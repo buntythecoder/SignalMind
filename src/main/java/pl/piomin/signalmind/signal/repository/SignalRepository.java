@@ -2,6 +2,7 @@ package pl.piomin.signalmind.signal.repository;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import pl.piomin.signalmind.signal.domain.Signal;
+import pl.piomin.signalmind.signal.domain.SignalStatus;
 import pl.piomin.signalmind.signal.domain.SignalType;
 import pl.piomin.signalmind.stock.domain.Stock;
 
@@ -90,4 +91,25 @@ public interface SignalRepository extends JpaRepository<Signal, Long> {
     List<Signal> findByStockAndGeneratedAtBetweenOrderByGeneratedAtAsc(Stock stock,
                                                                          Instant from,
                                                                          Instant to);
+
+    // ── SM-31: Status-based lookups ────────────────────────────────────────────
+
+    /**
+     * Finds all active signals (GENERATED or TRIGGERED) across all stocks for
+     * real-time intraday monitoring by {@link pl.piomin.signalmind.signal.service.SignalStatusService}.
+     *
+     * @param statuses the set of statuses to match (typically GENERATED + TRIGGERED)
+     * @return signals whose current status is in the provided collection
+     */
+    List<Signal> findByStatusIn(Collection<SignalStatus> statuses);
+
+    /**
+     * Finds active signals for a specific stock.
+     * Used as a fallback when Redis set lookup is unavailable.
+     *
+     * @param stock    the stock to filter on
+     * @param statuses the set of statuses to match
+     * @return active signals for the given stock
+     */
+    List<Signal> findByStockAndStatusIn(Stock stock, Collection<SignalStatus> statuses);
 }

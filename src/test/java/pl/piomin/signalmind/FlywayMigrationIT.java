@@ -15,7 +15,10 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import org.springframework.dao.DataIntegrityViolationException;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -54,10 +57,10 @@ class FlywayMigrationIT {
     // ── Flyway history ────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Flyway applies exactly 14 migrations (V1-V14) with no failures")
+    @DisplayName("Flyway applies exactly 15 migrations (V1-V15) with no failures")
     void flyway_eightMigrationsAppliedSuccessfully() {
         MigrationInfo[] applied = flyway.info().applied();
-        assertEquals(14, applied.length, "Expected V1 through V14 to be applied");
+        assertEquals(15, applied.length, "Expected V1 through V15 to be applied");
         for (MigrationInfo m : applied) {
             assertEquals(
                     MigrationState.SUCCESS, m.getState(),
@@ -211,8 +214,9 @@ class FlywayMigrationIT {
                 Integer.class);
         // stocks, market_holidays, candles, candles_2024_01, candles_2024_02,
         // volume_baselines, signals, users, audit_log, signal_type_config, signal_feedback = 11
+        // V15 is an ALTER TABLE (adds status column) — no new tables, count stays 11.
         // (spring_batch_* tables are excluded by the NOT LIKE 'batch_%' filter)
-        assertEquals(11, count, "Expected 11 business tables in public schema after V1-V14 migrations");
+        assertEquals(11, count, "Expected 11 business tables in public schema after V1-V15 migrations");
     }
 
     // ── V14: signal_feedback ──────────────────────────────────────────────────
@@ -227,6 +231,44 @@ class FlywayMigrationIT {
         assertColumnExists("signal_feedback", "recorded_at");
         assertConstraintExists("uq_signal_feedback");
         assertConstraintExists("chk_feedback_type");
+    }
+
+    // ── V15: signal status column ─────────────────────────────────────────────
+
+    @Test
+    @DisplayName("V15: signals table has a status column defaulting to GENERATED")
+    void v15_signalStatusColumn() {
+        // Insert a minimal signal row using an existing stock from the seed data.
+        // regime must be one of the values allowed by chk_signals_regime.
+        jdbc.execute(
+                "INSERT INTO signals (stock_id, signal_type, direction, entry_price, " +
+                "target_price, stop_loss, confidence, regime, generated_at, valid_until) " +
+                "SELECT id, 'ORB', 'LONG', 100.00, 110.00, 95.00, 75, 'SIDEWAYS', " +
+                "now(), now() + interval '1 hour' FROM stocks LIMIT 1");
+
+        String status = jdbc.queryForObject(
+                "SELECT status FROM signals ORDER BY id DESC LIMIT 1", String.class);
+        assertEquals("GENERATED", status,
+                "New signals should default to status='GENERATED'");
+
+        // Verify the CHECK constraint rejects invalid values.
+        // Spring wraps PostgreSQL's ConstraintViolationException in DataIntegrityViolationException.
+        assertThrows(DataIntegrityViolationException.class, () ->
+                jdbc.execute(
+                        "UPDATE signals SET status = 'INVALID_STATUS' " +
+                        "WHERE id = (SELECT MAX(id) FROM signals)"),
+                "chk_signal_status constraint should reject 'INVALID_STATUS'");
+    }
+
+    @Test
+    @DisplayName("V15: idx_signals_status partial index exists on signals table")
+    void v15_signalStatusIndexExists() {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM pg_indexes " +
+                "WHERE tablename = 'signals' AND indexname = 'idx_signals_status'",
+                Integer.class);
+        assertTrue(count != null && count > 0,
+                "Partial index idx_signals_status should exist on the signals table");
     }
 
     // ── V7: holiday seed ──────────────────────────────────────────────────────

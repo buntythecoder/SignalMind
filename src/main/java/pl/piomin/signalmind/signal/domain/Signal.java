@@ -21,8 +21,9 @@ import java.time.Instant;
  * <p>Maps to the {@code signals} table, which was created in V4 and extended
  * in V10 to add ORB-specific columns ({@code target2}, {@code orb_high}, {@code orb_low}).
  *
- * <p>Only the dispatch lifecycle fields ({@code dispatched}, {@code dispatchedAt}) are
- * mutable after creation; all other fields are set once in the constructor and immutable.
+ * <p>The dispatch lifecycle fields ({@code dispatched}, {@code dispatchedAt}) and the
+ * intraday status ({@code status}, SM-31) are mutable after creation; all other fields
+ * are set once in the constructor and immutable.
  */
 @Entity
 @Table(name = "signals")
@@ -110,6 +111,17 @@ public class Signal {
     @Column(name = "score_confluence")
     private Integer scoreConfluence;
 
+    // ── SM-31: Intraday signal status ─────────────────────────────────────────
+
+    /**
+     * Current lifecycle status of this signal (SM-31).
+     * Starts as {@link SignalStatus#GENERATED} and transitions via
+     * {@link SignalStatusService} as prices move intraday.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private SignalStatus status = SignalStatus.GENERATED;
+
     // ── Constructors ──────────────────────────────────────────────────────────
 
     /** Required by JPA. Not for application use. */
@@ -187,6 +199,18 @@ public class Signal {
         this.scoreWinRate = winRate;
         this.scoreConfluence = confluence;
         this.confidence = Math.min(100, base + volume + timeOfDay + regime + winRate + confluence);
+    }
+
+    // ── SM-31: Status lifecycle ───────────────────────────────────────────────
+
+    /**
+     * Transitions this signal to a new intraday status.
+     * Called exclusively by {@link SignalStatusService}.
+     *
+     * @param newStatus the status to transition to
+     */
+    public void updateStatus(SignalStatus newStatus) {
+        this.status = newStatus;
     }
 
     // ── Setters (dispatch only) ───────────────────────────────────────────────
@@ -287,6 +311,10 @@ public class Signal {
 
     public Integer getScoreConfluence() {
         return scoreConfluence;
+    }
+
+    public SignalStatus getStatus() {
+        return status;
     }
 
     @Override

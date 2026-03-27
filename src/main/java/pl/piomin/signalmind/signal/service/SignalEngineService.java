@@ -11,6 +11,7 @@ import pl.piomin.signalmind.signal.detector.SignalDetector;
 import pl.piomin.signalmind.signal.domain.Signal;
 import pl.piomin.signalmind.signal.domain.SignalType;
 import pl.piomin.signalmind.signal.repository.SignalRepository;
+import pl.piomin.signalmind.signal.sse.SignalSseService;
 import pl.piomin.signalmind.stock.domain.Candle;
 import pl.piomin.signalmind.stock.domain.Stock;
 import pl.piomin.signalmind.stock.repository.CandleRepository;
@@ -80,6 +81,7 @@ public class SignalEngineService {
     private final Optional<SignalTypeConfigService> configService;
     private final Optional<SignalDeduplicationService> deduplicationService;
     private final TelegramAlertFormatter formatter;
+    private final Optional<SignalSseService> sseService;
 
     /**
      * Per-minute dispatch counter (SM-27: max 5 dispatches per minute).
@@ -98,7 +100,8 @@ public class SignalEngineService {
                                ConfidenceScoringService scoringService,
                                Optional<SignalTypeConfigService> configService,
                                Optional<SignalDeduplicationService> deduplicationService,
-                               TelegramAlertFormatter formatter) {
+                               TelegramAlertFormatter formatter,
+                               Optional<SignalSseService> sseService) {
         this.detectors             = detectors;
         this.stockRepository       = stockRepository;
         this.candleRepository      = candleRepository;
@@ -110,6 +113,7 @@ public class SignalEngineService {
         this.configService         = configService;
         this.deduplicationService  = deduplicationService;
         this.formatter             = formatter;
+        this.sseService            = sseService;
     }
 
     // ── Scheduled run ─────────────────────────────────────────────────────────
@@ -218,6 +222,9 @@ public class SignalEngineService {
                 signalRepository.save(signal);
                 signalsGenerated++;
                 stockSignalGenerated = true;
+
+                // SM-30: push new signal to all connected SSE dashboard clients
+                sseService.ifPresent(sse -> sse.broadcastSignal(signal, stock.getSymbol()));
 
                 log.info("[signal-engine] {} {} {} signal for {} entry={} confidence={} " +
                                 "(base={} vol={} tod={} reg={} wr={} conf={}) valid_until={}",

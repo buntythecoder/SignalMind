@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import pl.piomin.signalmind.signal.repository.SignalRepository;
+import pl.piomin.signalmind.signal.service.OutcomeTrackerService;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -23,6 +24,9 @@ import java.time.ZoneId;
  *   <li>Morning: 09:10 IST Mon–Fri — market opens at 09:15 IST</li>
  *   <li>Evening: 15:35 IST Mon–Fri — market closes at 15:30 IST</li>
  * </ul>
+ *
+ * <p>The evening summary is enriched with win/loss stats from
+ * {@link OutcomeTrackerService} (SM-32).
  */
 @Service
 @ConditionalOnProperty(prefix = "telegram", name = "bot-token", matchIfMissing = false)
@@ -37,13 +41,16 @@ public class TelegramSummaryScheduler {
             "NSE market opens today. Monitoring 62 instruments across 7 signal types.\n" +
             "<i>Have a profitable session!</i>";
 
-    private final TelegramAlertService alertService;
-    private final SignalRepository     signalRepository;
+    private final TelegramAlertService  alertService;
+    private final SignalRepository      signalRepository;
+    private final OutcomeTrackerService outcomeTracker;
 
     public TelegramSummaryScheduler(TelegramAlertService alertService,
-                                    SignalRepository signalRepository) {
+                                    SignalRepository signalRepository,
+                                    OutcomeTrackerService outcomeTracker) {
         this.alertService     = alertService;
         this.signalRepository = signalRepository;
+        this.outcomeTracker   = outcomeTracker;
     }
 
     /**
@@ -57,23 +64,34 @@ public class TelegramSummaryScheduler {
     }
 
     /**
-     * Sends a "market close" summary at 15:35 IST on weekdays, including
-     * a count of signals dispatched during the session.
+     * Sends an enriched "market close" summary at 15:35 IST on weekdays.
+     * Includes total dispatched signals and the session win-rate computed by
+     * {@link OutcomeTrackerService} (SM-32).
      * Cron: {@code 0 35 15 * * MON-FRI}.
      */
     @Scheduled(cron = "0 35 15 * * MON-FRI", zone = "Asia/Kolkata")
     public void sendDailySummary() {
-        LocalDate today = LocalDate.now(IST);
-        Instant sessionStart = today.atTime(LocalTime.of(9, 15)).atZone(IST).toInstant();
-        Instant sessionEnd   = today.atTime(LocalTime.of(15, 35)).atZone(IST).toInstant();
+        LocalDate today        = LocalDate.now(IST);
+        Instant   sessionStart = today.atTime(LocalTime.of(9, 15)).atZone(IST).toInstant();
+        Instant   sessionEnd   = today.atTime(LocalTime.of(15, 35)).atZone(IST).toInstant();
 
-        long dispatched = signalRepository.countByDispatchedTrueAndGeneratedAtBetween(sessionStart, sessionEnd);
+        long dispatched = signalRepository.countByDispatchedTrueAndGeneratedAtBetween(
+                sessionStart, sessionEnd);
+
+        OutcomeTrackerService.WinRateSummary summary =
+                outcomeTracker.getDailySummary(sessionStart, sessionEnd);
 
         String message = "\uD83D\uDCC8 <b>Market session ended</b>\n"
-                + "Signals dispatched today: " + dispatched + "\n"
+                + "Signals today: " + summary.total() + "\n"
+                + "Wins: " + summary.wins()
+                + " | Losses: " + summary.losses()
+                + " | Expired: " + summary.expires() + "\n"
+                + "Win rate: " + summary.formattedWinRate() + "\n"
                 + "Thank you for using SignalMind!";
 
-        log.info("[telegram-summary] Sending daily summary: {} signals dispatched", dispatched);
+        log.info("[telegram-summary] Sending daily summary: {} signals dispatched, "
+                + "{} outcomes recorded, win-rate={}",
+                dispatched, summary.total(), summary.formattedWinRate());
         alertService.sendAlert(message);
     }
 }

@@ -57,10 +57,10 @@ class FlywayMigrationIT {
     // ── Flyway history ────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Flyway applies exactly 15 migrations (V1-V15) with no failures")
+    @DisplayName("Flyway applies exactly 16 migrations (V1-V16) with no failures")
     void flyway_eightMigrationsAppliedSuccessfully() {
         MigrationInfo[] applied = flyway.info().applied();
-        assertEquals(15, applied.length, "Expected V1 through V15 to be applied");
+        assertEquals(16, applied.length, "Expected V1 through V16 to be applied");
         for (MigrationInfo m : applied) {
             assertEquals(
                     MigrationState.SUCCESS, m.getState(),
@@ -203,7 +203,7 @@ class FlywayMigrationIT {
     // ── Total table count ─────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Schema contains exactly 11 business tables (8 core + 2 partitions + signal_feedback); excludes flyway_schema_history")
+    @DisplayName("Schema contains exactly 12 business tables (8 core + 2 partitions + signal_feedback + signal_outcomes); excludes flyway_schema_history")
     void schema_correctTotalTableCount() {
         Integer count = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "
@@ -213,10 +213,12 @@ class FlywayMigrationIT {
                         + "  AND table_name NOT LIKE 'batch_%'",
                 Integer.class);
         // stocks, market_holidays, candles, candles_2024_01, candles_2024_02,
-        // volume_baselines, signals, users, audit_log, signal_type_config, signal_feedback = 11
-        // V15 is an ALTER TABLE (adds status column) — no new tables, count stays 11.
+        // volume_baselines, signals, users, audit_log, signal_type_config, signal_feedback,
+        // signal_outcomes = 12
+        // V15 is an ALTER TABLE (adds status column) — no new tables.
+        // V16 adds signal_outcomes — count goes from 11 to 12.
         // (spring_batch_* tables are excluded by the NOT LIKE 'batch_%' filter)
-        assertEquals(11, count, "Expected 11 business tables in public schema after V1-V15 migrations");
+        assertEquals(12, count, "Expected 12 business tables in public schema after V1-V16 migrations");
     }
 
     // ── V14: signal_feedback ──────────────────────────────────────────────────
@@ -269,6 +271,65 @@ class FlywayMigrationIT {
                 Integer.class);
         assertTrue(count != null && count > 0,
                 "Partial index idx_signals_status should exist on the signals table");
+    }
+
+    // ── V16: signal_outcomes ──────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("V16: signal_outcomes table exists with required columns")
+    void v16_signalOutcomesTable() {
+        assertTableExists("signal_outcomes");
+        for (String col : new String[]{
+                "id", "signal_id", "outcome", "exit_price",
+                "exit_time", "pnl_points", "mae", "mfe", "recorded_at"}) {
+            assertColumnExists("signal_outcomes", col);
+        }
+    }
+
+    @Test
+    @DisplayName("V16: uq_signal_outcome unique constraint rejects duplicate signal_id")
+    void v16_uniqueConstraintRejectsDuplicate() {
+        // Insert a parent signal so the FK is satisfied
+        jdbc.execute(
+                "INSERT INTO signals (stock_id, signal_type, direction, entry_price, "
+                + "target_price, stop_loss, confidence, regime, generated_at, valid_until) "
+                + "SELECT id, 'ORB', 'LONG', 200.00, 210.00, 195.00, 70, 'SIDEWAYS', "
+                + "now(), now() + interval '1 hour' FROM stocks LIMIT 1");
+
+        Long signalId = jdbc.queryForObject(
+                "SELECT id FROM signals ORDER BY id DESC LIMIT 1", Long.class);
+
+        jdbc.update(
+                "INSERT INTO signal_outcomes (signal_id, outcome, recorded_at) VALUES (?, 'EXPIRED', now())",
+                signalId);
+
+        assertThrows(DataIntegrityViolationException.class, () ->
+                jdbc.update(
+                        "INSERT INTO signal_outcomes (signal_id, outcome, recorded_at) "
+                        + "VALUES (?, 'STOP_HIT', now())",
+                        signalId),
+                "uq_signal_outcome should prevent a second outcome row for the same signal");
+    }
+
+    @Test
+    @DisplayName("V16: chk_outcome CHECK constraint rejects invalid outcome value")
+    void v16_checkConstraintRejectsInvalidOutcome() {
+        // Reuse the last inserted signal from the unique constraint test, or insert a fresh one
+        jdbc.execute(
+                "INSERT INTO signals (stock_id, signal_type, direction, entry_price, "
+                + "target_price, stop_loss, confidence, regime, generated_at, valid_until) "
+                + "SELECT id, 'ORB', 'SHORT', 300.00, 290.00, 305.00, 65, 'SIDEWAYS', "
+                + "now(), now() + interval '1 hour' FROM stocks LIMIT 1");
+
+        Long signalId = jdbc.queryForObject(
+                "SELECT id FROM signals ORDER BY id DESC LIMIT 1", Long.class);
+
+        assertThrows(DataIntegrityViolationException.class, () ->
+                jdbc.update(
+                        "INSERT INTO signal_outcomes (signal_id, outcome, recorded_at) "
+                        + "VALUES (?, 'INVALID_OUTCOME', now())",
+                        signalId),
+                "chk_outcome should reject outcome values not in the allowed set");
     }
 
     // ── V7: holiday seed ──────────────────────────────────────────────────────

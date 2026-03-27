@@ -1,0 +1,122 @@
+spring:
+  application:
+    name: signalmind
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+
+  # ── DataSource ─────────────────────────────────────────────────────────────
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:signalmind}
+    username: ${DB_USERNAME:signalmind}
+    password: ${DB_PASSWORD:signalmind_dev}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  # ── JPA ────────────────────────────────────────────────────────────────────
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+        default_schema: public
+    open-in-view: false
+
+  # ── Flyway ─────────────────────────────────────────────────────────────────
+  flyway:
+    enabled: true
+    baseline-on-migrate: false
+    locations: classpath:db/migration
+    validate-on-migrate: true
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 1
+
+  # ── Virtual Threads ────────────────────────────────────────────────────────
+  threads:
+    virtual:
+      enabled: true
+
+  # ── Security ───────────────────────────────────────────────────────────────
+  security:
+    user:
+      name: admin
+      password: changeme
+
+# ── Server ─────────────────────────────────────────────────────────────────
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: /
+  compression:
+    enabled: true
+    mime-types: application/json,application/javascript,text/css,text/plain
+
+# ── Actuator ───────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,flyway
+  endpoint:
+    health:
+      show-details: always
+  info:
+    env:
+      enabled: true
+
+# ── OpenAPI ────────────────────────────────────────────────────────────────
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    try-it-out-enabled: true
+
+# ── Application info ───────────────────────────────────────────────────────
+info:
+  app:
+    name: SignalMind
+    version: "@project.version@"
+    description: Real-time intraday signal intelligence for NSE/BSE
+
+# ── JWT ────────────────────────────────────────────────────────────────────
+jwt:
+  secret: ${JWT_SECRET:devSecretMustBeAtLeast64BytesLongForHS512AlgorithmSignalMind2024}
+  access-expiry-minutes: ${JWT_ACCESS_EXPIRY_MINUTES:15}
+  refresh-expiry-days: ${JWT_REFRESH_EXPIRY_DAYS:7}
+
+# ── Angel One SmartAPI ─────────────────────────────────────────────────────
+angelone:
+  api-key: ${ANGELONE_API_KEY:}
+  client-id: ${ANGELONE_CLIENT_ID:}
+  mpin: ${ANGELONE_MPIN:}
+  totp-secret: ${ANGELONE_TOTP_SECRET:}
+  feed-url: ${ANGELONE_FEED_URL:wss://smartapisocket.angelbroking.com/smart-stream}
+
+# ── ICICI Breeze API ───────────────────────────────────────────────────────
+breeze:
+  api-key: ${BREEZE_API_KEY:}
+  api-secret: ${BREEZE_API_SECRET:}
+  session-token: ${BREEZE_SESSION_TOKEN:}
+
+# ── Telegram ───────────────────────────────────────────────────────────────
+telegram:
+  bot-token: ${TELEGRAM_BOT_TOKEN:}
+  chat-id: ${TELEGRAM_CHAT_ID:}

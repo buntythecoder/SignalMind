@@ -1,0 +1,31 @@
+spring:
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
+    show-sql: false   # use datasource-proxy or P6Spy for SQL logging in dev
+
+  flyway:
+    baseline-on-migrate: true
+
+logging:
+  level:
+    pl.piomin.signalmind: DEBUG
+    org.springframework.web: INFO
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE
+    org.flywaydb: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    health:
+      show-details: always
+
+# Dev-only: relax security for Swagger
+springdoc:
+  swagger-ui:
+    enabled: true

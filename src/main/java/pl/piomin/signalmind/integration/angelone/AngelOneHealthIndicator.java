@@ -3,36 +3,56 @@ package pl.piomin.signalmind.integration.angelone;
 import org.springframework.boot.actuate.health.Health;
 import org.springframework.boot.actuate.health.HealthIndicator;
 import org.springframework.stereotype.Component;
+import pl.piomin.signalmind.ingestion.domain.ConnectionState;
+import pl.piomin.signalmind.ingestion.service.DataIngestionService;
+
+import java.util.Optional;
 
 /**
  * Actuator health check for Angel One SmartAPI connectivity.
- * Full connectivity logic will be implemented in SM-12.
+ *
+ * <p>When {@link DataIngestionService} is active (i.e., {@code angelone.ingestion.enabled=true}),
+ * reports the live WebSocket connection state for both Connection A (NIFTY50) and
+ * Connection B (other indices). Both must be {@link ConnectionState#CONNECTED} for
+ * the indicator to report {@code UP}.
+ *
+ * <p>When the ingestion service is absent (default — ingestion disabled), the indicator
+ * falls back to credential-presence checking: {@code UNKNOWN} if credentials are
+ * configured, {@code DOWN} if they are missing.
  */
 @Component("angelOne")
 public class AngelOneHealthIndicator implements HealthIndicator {
 
     private final AngelOneConfig config;
+    private final Optional<DataIngestionService> ingestion;
 
-    public AngelOneHealthIndicator(AngelOneConfig config) {
+    public AngelOneHealthIndicator(AngelOneConfig config,
+                                   Optional<DataIngestionService> ingestion) {
         this.config = config;
+        this.ingestion = ingestion;
     }
 
     @Override
     public Health health() {
-        boolean configured = config.apiKey() != null && !config.apiKey().isBlank()
-                && config.clientId() != null && !config.clientId().isBlank();
-
-        if (!configured) {
-            return Health.down()
-                    .withDetail("reason", "Angel One API credentials not configured")
-                    .withDetail("hint", "Set ANGELONE_API_KEY and ANGELONE_CLIENT_ID in .env")
+        if (ingestion.isPresent()) {
+            DataIngestionService svc = ingestion.get();
+            boolean bothUp = svc.getStateA() == ConnectionState.CONNECTED
+                    && svc.getStateB() == ConnectionState.CONNECTED;
+            Health.Builder builder = bothUp ? Health.up() : Health.down();
+            return builder
+                    .withDetail("connA", svc.getStateA())
+                    .withDetail("connB", svc.getStateB())
+                    .withDetail("lastTickAt",
+                            svc.getLastTickAt() != null ? svc.getLastTickAt().toString() : "none")
                     .build();
         }
 
-        return Health.unknown()
-                .withDetail("status", "credentials-configured")
+        // Fallback: ingestion disabled — report credential configuration status.
+        boolean configured = config.apiKey() != null && !config.apiKey().isBlank()
+                && config.clientId() != null && !config.clientId().isBlank();
+        return (configured ? Health.unknown() : Health.down())
+                .withDetail("ingestionEnabled", false)
                 .withDetail("feedUrl", config.feedUrl())
-                .withDetail("note", "Live connectivity check implemented in SM-12")
                 .build();
     }
 }

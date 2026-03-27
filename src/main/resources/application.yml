@@ -48,6 +48,13 @@ spring:
           max-idle: 4
           min-idle: 1
 
+  # ── Spring Batch ───────────────────────────────────────────────────────────
+  batch:
+    jdbc:
+      initialize-schema: always   # creates spring_batch_* tables automatically
+    job:
+      enabled: false              # do NOT auto-run jobs on startup; trigger via API or schedule
+
   # ── Virtual Threads ────────────────────────────────────────────────────────
   threads:
     virtual:

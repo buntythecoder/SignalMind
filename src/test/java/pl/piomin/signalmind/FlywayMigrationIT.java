@@ -179,11 +179,13 @@ class FlywayMigrationIT {
                 "SELECT COUNT(*) FROM information_schema.tables "
                         + "WHERE table_schema = 'public' "
                         + "  AND table_type = 'BASE TABLE' "
-                        + "  AND table_name NOT LIKE 'flyway%'",
+                        + "  AND table_name NOT LIKE 'flyway%' "
+                        + "  AND table_name NOT LIKE 'batch_%'",
                 Integer.class);
         // stocks, market_holidays, candles, candles_2024_01, candles_2024_02,
         // volume_baselines, signals, users, audit_log = 9
-        assertEquals(9, count, "Expected 9 business tables in public schema after V1-V5 migrations");
+        // (spring_batch_* tables are excluded by the NOT LIKE 'batch_%' filter)
+        assertEquals(9, count, "Expected 9 business tables in public schema after V1-V6 migrations");
     }
 
     // ── Seed verification ─────────────────────────────────────────────────────

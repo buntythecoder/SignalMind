@@ -44,6 +44,9 @@ dependencies {
     // JSON
     implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
 
+    // Spring Batch (historical bulk pull job — SM-14)
+    implementation("org.springframework.boot:spring-boot-starter-batch")
+
     // HTTP client (for Breeze API)
     implementation("org.apache.httpcomponents.client5:httpclient5")
 

@@ -53,4 +53,27 @@ public interface SignalDetector {
      * @return signal type constant
      */
     SignalType signalType();
+
+    /**
+     * Maximum number of signals this detector may generate per stock per session.
+     * Default is 1 (one signal per stock per day). Override for detectors that
+     * allow multiple signals per session (e.g. VWAP allows up to 3).
+     *
+     * @return maximum signals per stock per session
+     */
+    default int maxSignalsPerDay() {
+        return 1;
+    }
+
+    /**
+     * The set of signal types to include when counting signals against
+     * {@link #maxSignalsPerDay()}. Default is just this detector's own type.
+     * Override when a daily cap is shared across multiple types
+     * (e.g. VWAP_BREAKOUT and VWAP_BREAKDOWN share a combined cap of 3).
+     *
+     * @return signal types whose count is checked against the cap
+     */
+    default List<SignalType> countedTypes() {
+        return List.of(signalType());
+    }
 }

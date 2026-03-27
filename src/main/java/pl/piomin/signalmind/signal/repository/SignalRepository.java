@@ -6,6 +6,7 @@ import pl.piomin.signalmind.signal.domain.SignalType;
 import pl.piomin.signalmind.stock.domain.Stock;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -26,6 +27,21 @@ public interface SignalRepository extends JpaRepository<Signal, Long> {
      */
     boolean existsByStockAndSignalTypeAndGeneratedAtBetween(Stock stock, SignalType type,
                                                              Instant from, Instant to);
+
+    /**
+     * Counts how many signals of the given types were generated for a stock within
+     * the provided time window. Used by the engine to enforce per-detector daily
+     * signal caps (e.g. combined VWAP_BREAKOUT + VWAP_BREAKDOWN cap of 3).
+     *
+     * @param stock the stock to check
+     * @param types signal types to count (may span multiple detectors)
+     * @param from  window start (inclusive)
+     * @param to    window end (exclusive)
+     * @return number of matching signals
+     */
+    long countByStockAndSignalTypeInAndGeneratedAtBetween(Stock stock,
+                                                           Collection<SignalType> types,
+                                                           Instant from, Instant to);
 
     /**
      * Finds signals that have not yet been dispatched and whose validity window

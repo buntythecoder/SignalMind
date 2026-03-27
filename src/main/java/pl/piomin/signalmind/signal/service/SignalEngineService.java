@@ -50,8 +50,8 @@ public class SignalEngineService {
     private static final Logger log = LoggerFactory.getLogger(SignalEngineService.class);
 
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
-    private static final LocalTime ENGINE_START = LocalTime.of(9, 30);
-    private static final LocalTime ENGINE_END   = LocalTime.of(11, 35);
+    private static final LocalTime ENGINE_START = LocalTime.of(9, 15);
+    private static final LocalTime ENGINE_END   = LocalTime.of(15, 35);
 
     /** Minimum confidence for Telegram dispatch. */
     private static final int DISPATCH_CONFIDENCE_GATE = 60;
@@ -95,7 +95,7 @@ public class SignalEngineService {
 
         LocalDate today = LocalDate.now(IST);
         Instant sessionStart = today.atTime(9, 15).atZone(IST).toInstant();
-        Instant sessionEnd   = today.atTime(11, 35).atZone(IST).toInstant();
+        Instant sessionEnd   = today.atTime(15, 35).atZone(IST).toInstant();
 
         String regime = regimeService
                 .flatMap(MarketRegimeService::currentRegime)
@@ -110,9 +110,10 @@ public class SignalEngineService {
 
             for (SignalDetector detector : detectors) {
 
-                // One signal per detector type per stock per session
-                if (signalRepository.existsByStockAndSignalTypeAndGeneratedAtBetween(
-                        stock, detector.signalType(), sessionStart, sessionEnd)) {
+                // Enforce per-detector daily signal cap (1 by default; VWAP detectors share a cap of 3)
+                long existingCount = signalRepository.countByStockAndSignalTypeInAndGeneratedAtBetween(
+                        stock, detector.countedTypes(), sessionStart, sessionEnd);
+                if (existingCount >= detector.maxSignalsPerDay()) {
                     continue;
                 }
 

@@ -54,6 +54,29 @@ public interface SignalRepository extends JpaRepository<Signal, Long> {
     List<Signal> findByDispatchedFalseAndValidUntilAfterOrderByGeneratedAtAsc(Instant now);
 
     /**
+     * Counts how many signals were generated for a stock within the session window,
+     * across all signal types combined.  Used by the SM-27 engine to enforce the
+     * max-3-signals-per-stock-per-day guardrail.
+     *
+     * @param stock the stock to check
+     * @param from  session start (inclusive)
+     * @param to    session end (exclusive)
+     * @return total signal count for this stock today
+     */
+    long countByStockAndGeneratedAtBetween(Stock stock, Instant from, Instant to);
+
+    /**
+     * Counts how many signals have been dispatched to the notification channel
+     * within the given time window (platform-wide, not per stock).  Used by
+     * the SM-27 engine to enforce the max-25-dispatched-per-day guardrail.
+     *
+     * @param from window start (inclusive)
+     * @param to   window end (exclusive)
+     * @return number of dispatched signals in the window
+     */
+    long countByDispatchedTrueAndGeneratedAtBetween(Instant from, Instant to);
+
+    /**
      * Finds all signals generated for a stock within the given time window.
      * Used by the SM-26 Confidence Scoring Engine to detect multi-signal
      * confluence: a second or third signal for the same stock within 5 minutes

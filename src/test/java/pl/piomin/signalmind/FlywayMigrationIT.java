@@ -54,10 +54,10 @@ class FlywayMigrationIT {
     // ── Flyway history ────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Flyway applies exactly 12 migrations (V1-V12) with no failures")
+    @DisplayName("Flyway applies exactly 13 migrations (V1-V13) with no failures")
     void flyway_eightMigrationsAppliedSuccessfully() {
         MigrationInfo[] applied = flyway.info().applied();
-        assertEquals(12, applied.length, "Expected V1 through V12 to be applied");
+        assertEquals(13, applied.length, "Expected V1 through V13 to be applied");
         for (MigrationInfo m : applied) {
             assertEquals(
                     MigrationState.SUCCESS, m.getState(),
@@ -182,10 +182,25 @@ class FlywayMigrationIT {
         }
     }
 
+    // ── V13: signal_type_config ───────────────────────────────────────────────
+
+    @Test
+    @DisplayName("V13: signal_type_config table exists with all 7 signal types seeded and enabled")
+    void v13_signalTypeConfigSeeded() {
+        assertTableExists("signal_type_config");
+        assertColumnExists("signal_type_config", "signal_type");
+        assertColumnExists("signal_type_config", "enabled");
+        assertColumnExists("signal_type_config", "updated_at");
+
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM signal_type_config WHERE enabled = true", Integer.class);
+        assertEquals(7, count, "All 7 signal types should be seeded as enabled");
+    }
+
     // ── Total table count ─────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Schema contains exactly 9 business tables (7 core + 2 partitions); excludes flyway_schema_history")
+    @DisplayName("Schema contains exactly 10 business tables (8 core + 2 partitions); excludes flyway_schema_history")
     void schema_correctTotalTableCount() {
         Integer count = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "
@@ -195,10 +210,9 @@ class FlywayMigrationIT {
                         + "  AND table_name NOT LIKE 'batch_%'",
                 Integer.class);
         // stocks, market_holidays, candles, candles_2024_01, candles_2024_02,
-        // volume_baselines, signals, users, audit_log = 9
+        // volume_baselines, signals, users, audit_log, signal_type_config = 10
         // (spring_batch_* tables are excluded by the NOT LIKE 'batch_%' filter)
-        // V7 is a data-only migration (holiday seed) — no new tables
-        assertEquals(9, count, "Expected 9 business tables in public schema after V1-V7 migrations");
+        assertEquals(10, count, "Expected 10 business tables in public schema after V1-V13 migrations");
     }
 
     // ── V7: holiday seed ──────────────────────────────────────────────────────

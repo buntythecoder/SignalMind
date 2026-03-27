@@ -9,13 +9,13 @@ import pl.piomin.signalmind.regime.service.MarketRegimeService;
 import pl.piomin.signalmind.signal.detector.GapFillShortDetector;
 import pl.piomin.signalmind.signal.detector.SignalDetector;
 import pl.piomin.signalmind.signal.domain.Signal;
+import pl.piomin.signalmind.signal.domain.SignalType;
 import pl.piomin.signalmind.signal.repository.SignalRepository;
 import pl.piomin.signalmind.stock.domain.Candle;
 import pl.piomin.signalmind.stock.domain.Stock;
 import pl.piomin.signalmind.stock.repository.CandleRepository;
 import pl.piomin.signalmind.stock.repository.StockRepository;
 import pl.piomin.signalmind.stock.repository.VolumeBaselineRepository;
-import pl.piomin.signalmind.signal.service.ConfidenceScoringService;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -27,22 +27,28 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Orchestrates all registered {@link SignalDetector} implementations during the
- * Opening-Range Breakout window (SM-22).
+ * Orchestrates all registered {@link SignalDetector} implementations during
+ * the Opening-Range Breakout window (SM-22).
  *
  * <h2>Scheduling</h2>
- * Runs at second=30 of every minute from 09:30 to 11:35 IST, Monday–Friday.
+ * Runs at second=30 of every minute from 09:15 to 15:35 IST, Monday–Friday.
  * The 30-second offset gives the candle assembler time to close and persist the
  * just-completed minute before detection runs.
  *
  * <h2>Per-run logic</h2>
  * <ol>
  *   <li>Resolve the current market regime from Redis (falls back to SIDEWAYS).</li>
- *   <li>For each active stock × detector, skip if a signal was already generated this session.</li>
+ *   <li>For each active stock × detector, apply SM-27 guardrails:
+ *       feature-flag check, Redis deduplication, per-detector daily cap,
+ *       and max-3-signals-per-stock guardrail.</li>
  *   <li>Load today's candles, reverse to oldest-first, build volume-baseline map.</li>
- *   <li>Call {@link SignalDetector#detect}; persist and optionally dispatch the result.</li>
+ *   <li>Call {@link SignalDetector#detect}; apply SM-26 confidence scoring,
+ *       persist and optionally dispatch the result.</li>
+ *   <li>Dispatch gate (SM-27): skip Telegram if daily dispatch budget (25) is
+ *       exhausted or the per-minute rate limit (5/min) is reached.</li>
  *   <li>Move to next stock after the first signal (one signal per stock per run).</li>
  * </ol>
  */
@@ -55,8 +61,13 @@ public class SignalEngineService {
     private static final LocalTime ENGINE_START = LocalTime.of(9, 15);
     private static final LocalTime ENGINE_END   = LocalTime.of(15, 35);
 
-    /** Minimum confidence for Telegram dispatch. */
+    /** Minimum confidence for Telegram dispatch (SM-26). */
     private static final int DISPATCH_CONFIDENCE_GATE = 60;
+
+    /** SM-27 guardrails. */
+    private static final int MAX_SIGNALS_PER_STOCK_PER_DAY = 3;
+    private static final int MAX_DISPATCHED_PER_DAY        = 25;
+    private static final int MAX_DISPATCHED_PER_MINUTE     = 5;
 
     private final List<SignalDetector> detectors;
     private final StockRepository stockRepository;
@@ -66,6 +77,15 @@ public class SignalEngineService {
     private final TelegramAlertService telegram;
     private final Optional<MarketRegimeService> regimeService;
     private final ConfidenceScoringService scoringService;
+    private final Optional<SignalTypeConfigService> configService;
+    private final Optional<SignalDeduplicationService> deduplicationService;
+
+    /**
+     * Per-minute dispatch counter (SM-27: max 5 dispatches per minute).
+     * Reset at the start of each engine tick by {@link #refreshMinuteCounter}.
+     */
+    private final AtomicInteger minuteDispatchCount = new AtomicInteger(0);
+    private volatile int currentMinuteOfDay = -1;
 
     public SignalEngineService(List<SignalDetector> detectors,
                                StockRepository stockRepository,
@@ -74,21 +94,25 @@ public class SignalEngineService {
                                SignalRepository signalRepository,
                                TelegramAlertService telegram,
                                Optional<MarketRegimeService> regimeService,
-                               ConfidenceScoringService scoringService) {
-        this.detectors = detectors;
-        this.stockRepository = stockRepository;
-        this.candleRepository = candleRepository;
+                               ConfidenceScoringService scoringService,
+                               Optional<SignalTypeConfigService> configService,
+                               Optional<SignalDeduplicationService> deduplicationService) {
+        this.detectors             = detectors;
+        this.stockRepository       = stockRepository;
+        this.candleRepository      = candleRepository;
         this.volumeBaselineRepository = volumeBaselineRepository;
-        this.signalRepository = signalRepository;
-        this.telegram = telegram;
-        this.regimeService = regimeService;
-        this.scoringService = scoringService;
+        this.signalRepository      = signalRepository;
+        this.telegram              = telegram;
+        this.regimeService         = regimeService;
+        this.scoringService        = scoringService;
+        this.configService         = configService;
+        this.deduplicationService  = deduplicationService;
     }
 
     // ── Scheduled run ─────────────────────────────────────────────────────────
 
     /**
-     * Main engine tick — runs at :30 of every minute during the ORB window.
+     * Main engine tick — runs at :30 of every minute during the trading session.
      * Returns immediately if the current IST time is outside [ENGINE_START, ENGINE_END].
      */
     @Scheduled(cron = "30 * * * * MON-FRI", zone = "Asia/Kolkata")
@@ -97,6 +121,8 @@ public class SignalEngineService {
         if (now.isBefore(ENGINE_START) || now.isAfter(ENGINE_END)) {
             return;
         }
+
+        refreshMinuteCounter(now);
 
         LocalDate today = LocalDate.now(IST);
         Instant sessionStart = today.atTime(9, 15).atZone(IST).toInstant();
@@ -107,18 +133,47 @@ public class SignalEngineService {
                 .map(snap -> snap.regime().name())
                 .orElse("SIDEWAYS");
 
+        // SM-27: check daily dispatch budget once per run
+        long dispatchedToday = signalRepository
+                .countByDispatchedTrueAndGeneratedAtBetween(sessionStart, sessionEnd);
+        boolean dailyBudgetExhausted = dispatchedToday >= MAX_DISPATCHED_PER_DAY;
+        if (dailyBudgetExhausted) {
+            log.debug("[signal-engine] Daily dispatch budget reached ({}/{}), signals will be saved but not dispatched",
+                    dispatchedToday, MAX_DISPATCHED_PER_DAY);
+        }
+
         List<Stock> stocks = stockRepository.findAllByActiveTrue();
         int signalsGenerated = 0;
 
         for (Stock stock : stocks) {
             boolean stockSignalGenerated = false;
 
+            // SM-27: max 3 signals per stock per day across all types
+            long stockSignalsToday = signalRepository
+                    .countByStockAndGeneratedAtBetween(stock, sessionStart, sessionEnd);
+            if (stockSignalsToday >= MAX_SIGNALS_PER_STOCK_PER_DAY) {
+                continue;
+            }
+
             for (SignalDetector detector : detectors) {
+
+                // SM-27: feature flag — skip disabled signal types (fail-open when service absent)
+                if (configService.map(s -> !s.isEnabled(detector.signalType())).orElse(false)) {
+                    continue;
+                }
+
+                // SM-27: Redis deduplication — 30-min cooldown per stock/type
+                if (deduplicationService.map(d -> d.isDuplicate(stock, detector.signalType()))
+                        .orElse(false)) {
+                    continue;
+                }
 
                 // Enforce per-detector daily signal cap (1 by default; VWAP detectors share a cap of 3)
                 long existingCount = signalRepository.countByStockAndSignalTypeInAndGeneratedAtBetween(
                         stock, detector.countedTypes(), sessionStart, sessionEnd);
                 if (existingCount >= detector.maxSignalsPerDay()) {
+                    // The dedup key was set above — clear it to avoid wasting the slot
+                    deduplicationService.ifPresent(d -> d.clearEntry(stock, detector.signalType()));
                     continue;
                 }
 
@@ -126,6 +181,7 @@ public class SignalEngineService {
                 List<Candle> rawCandles = candleRepository
                         .findByStockAndTimeRange(stock.getId(), sessionStart, sessionEnd);
                 if (rawCandles.isEmpty()) {
+                    deduplicationService.ifPresent(d -> d.clearEntry(stock, detector.signalType()));
                     continue;
                 }
 
@@ -136,42 +192,53 @@ public class SignalEngineService {
                 Map<LocalTime, Long> baselines = buildBaselines(stock, candles);
 
                 Optional<Signal> result = detector.detect(stock, candles, baselines, regime);
-                result.ifPresent(signal -> {
-                    // SM-26: apply 6-factor confidence scoring before persistence
-                    Instant triggerTime = signal.getGeneratedAt();
-                    Candle triggerCandle = candles.stream()
-                            .filter(c -> c.getCandleTime().equals(triggerTime))
-                            .findFirst()
-                            .orElse(candles.isEmpty() ? null : candles.get(0));
-                    long volume = triggerCandle != null ? triggerCandle.getVolume() : 0L;
-                    LocalTime slot = triggerTime.atZone(IST).toLocalTime();
-                    Long baseline = baselines.get(slot);
-                    scoringService.score(signal, volume, baseline);
 
-                    signalRepository.save(signal);
-                    log.info("[signal-engine] {} {} {} signal for {} entry={} confidence={} " +
-                                    "(base={} vol={} tod={} reg={} wr={} conf={}) valid_until={}",
-                            signal.getSignalType(), signal.getDirection(), stock.getSymbol(),
-                            signal.getEntryPrice(), signal.getConfidence(),
-                            signal.getScoreBase(), signal.getScoreVolume(),
-                            signal.getScoreTimeOfDay(), signal.getScoreRegime(),
-                            signal.getScoreWinRate(), signal.getScoreConfluence(),
-                            signal.getValidUntil());
-
-                    if (signal.getConfidence() >= DISPATCH_CONFIDENCE_GATE) {
-                        telegram.sendAlert(formatAlert(signal, stock));
-                    }
-                });
-
-                if (result.isPresent()) {
-                    signalsGenerated++;
-                    stockSignalGenerated = true;
-                    break; // one signal per stock per run
+                if (result.isEmpty()) {
+                    // Detection failed — clear the dedup slot so the detector can retry next tick
+                    deduplicationService.ifPresent(d -> d.clearEntry(stock, detector.signalType()));
+                    continue;
                 }
+
+                Signal signal = result.get();
+
+                // SM-26: apply 6-factor confidence scoring before persistence
+                Instant triggerTime = signal.getGeneratedAt();
+                Candle triggerCandle = candles.stream()
+                        .filter(c -> c.getCandleTime().equals(triggerTime))
+                        .findFirst()
+                        .orElse(candles.get(0));
+                long volume = triggerCandle.getVolume();
+                LocalTime slot = triggerTime.atZone(IST).toLocalTime();
+                Long baseline = baselines.get(slot);
+                scoringService.score(signal, volume, baseline);
+
+                signalRepository.save(signal);
+                signalsGenerated++;
+                stockSignalGenerated = true;
+
+                log.info("[signal-engine] {} {} {} signal for {} entry={} confidence={} " +
+                                "(base={} vol={} tod={} reg={} wr={} conf={}) valid_until={}",
+                        signal.getSignalType(), signal.getDirection(), stock.getSymbol(),
+                        signal.getEntryPrice(), signal.getConfidence(),
+                        signal.getScoreBase(), signal.getScoreVolume(),
+                        signal.getScoreTimeOfDay(), signal.getScoreRegime(),
+                        signal.getScoreWinRate(), signal.getScoreConfluence(),
+                        signal.getValidUntil());
+
+                // SM-27: dispatch gates — confidence, daily budget, per-minute rate limit
+                if (signal.getConfidence() >= DISPATCH_CONFIDENCE_GATE
+                        && !dailyBudgetExhausted
+                        && minuteDispatchCount.get() < MAX_DISPATCHED_PER_MINUTE) {
+                    telegram.sendAlert(formatAlert(signal, stock));
+                    signal.markDispatched(Instant.now());
+                    signalRepository.save(signal); // persist dispatch timestamp
+                    minuteDispatchCount.incrementAndGet();
+                }
+
+                break; // one signal per stock per run
             }
 
             if (stockSignalGenerated) {
-                // Move to next stock — already broke out of detector loop
                 continue;
             }
         }
@@ -180,6 +247,17 @@ public class SignalEngineService {
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /**
+     * Resets the per-minute dispatch counter when the minute rolls over.
+     */
+    private void refreshMinuteCounter(LocalTime now) {
+        int minute = now.getHour() * 60 + now.getMinute();
+        if (minute != currentMinuteOfDay) {
+            currentMinuteOfDay = minute;
+            minuteDispatchCount.set(0);
+        }
+    }
 
     /**
      * Builds a map of IST slot time → historical average volume by querying the
@@ -199,7 +277,6 @@ public class SignalEngineService {
 
     /**
      * Formats a Telegram alert message for a generated signal.
-     * Uses plain text with emoji for readability in Telegram.
      * GAP_FILL_SHORT signals include a broker note about intraday short-selling requirements.
      */
     private String formatAlert(Signal signal, Stock stock) {
@@ -210,7 +287,7 @@ public class SignalEngineService {
                 signal.getTargetPrice(), signal.getTarget2(),
                 signal.getConfidence());
 
-        if (signal.getSignalType() == pl.piomin.signalmind.signal.domain.SignalType.GAP_FILL_SHORT) {
+        if (signal.getSignalType() == SignalType.GAP_FILL_SHORT) {
             return base + "\n⚠️ " + GapFillShortDetector.BROKER_NOTE;
         }
         return base;

@@ -42,6 +42,9 @@ public class Stock {
     @Column(name = "angel_token", length = 20)
     private String angelToken;
 
+    @Column(name = "sector", length = 50)
+    private String sector;
+
     @Column(name = "active", nullable = false)
     private boolean active = true;
 
@@ -86,6 +89,10 @@ public class Stock {
         return angelToken;
     }
 
+    public String getSector() {
+        return sector;
+    }
+
     public boolean isActive() {
         return active;
     }
@@ -114,6 +121,10 @@ public class Stock {
 
     public void setAngelToken(String angelToken) {
         this.angelToken = angelToken;
+    }
+
+    public void setSector(String sector) {
+        this.sector = sector;
     }
 
     public void setActive(boolean active) {

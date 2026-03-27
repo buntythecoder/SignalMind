@@ -54,10 +54,10 @@ class FlywayMigrationIT {
     // ── Flyway history ────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Flyway applies exactly 5 migrations (V1-V5) with no failures")
-    void flyway_fiveMigrationsAppliedSuccessfully() {
+    @DisplayName("Flyway applies exactly 6 migrations (V1-V6) with no failures")
+    void flyway_sixMigrationsAppliedSuccessfully() {
         MigrationInfo[] applied = flyway.info().applied();
-        assertEquals(5, applied.length, "Expected V1 through V5 to be applied");
+        assertEquals(6, applied.length, "Expected V1 through V6 to be applied");
         for (MigrationInfo m : applied) {
             assertEquals(
                     MigrationState.SUCCESS, m.getState(),
@@ -79,6 +79,7 @@ class FlywayMigrationIT {
         assertColumnExists("stocks", "active");
         assertColumnExists("stocks", "created_at");
 
+        assertColumnExists("stocks", "sector");
         // Unique constraint on symbol
         assertConstraintExists("uq_stocks_symbol");
         // CHECK on index_type

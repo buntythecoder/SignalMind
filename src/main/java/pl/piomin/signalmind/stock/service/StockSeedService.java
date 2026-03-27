@@ -63,6 +63,7 @@ public class StockSeedService implements ApplicationRunner {
                 );
                 stock.setBreezeCode(entry.get("breezeCode"));
                 stock.setAngelToken(entry.get("angelToken"));
+                stock.setSector(entry.get("sector"));
                 stockRepository.save(stock);
                 seeded++;
             }

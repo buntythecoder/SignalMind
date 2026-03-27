@@ -6,6 +6,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import pl.piomin.signalmind.integration.telegram.TelegramAlertService;
 import pl.piomin.signalmind.regime.service.MarketRegimeService;
+import pl.piomin.signalmind.signal.detector.GapFillShortDetector;
 import pl.piomin.signalmind.signal.detector.SignalDetector;
 import pl.piomin.signalmind.signal.domain.Signal;
 import pl.piomin.signalmind.signal.repository.SignalRepository;
@@ -179,13 +180,19 @@ public class SignalEngineService {
     /**
      * Formats a Telegram alert message for a generated signal.
      * Uses plain text with emoji for readability in Telegram.
+     * GAP_FILL_SHORT signals include a broker note about intraday short-selling requirements.
      */
     private String formatAlert(Signal signal, Stock stock) {
-        return String.format(
+        String base = String.format(
                 "📊 %s %s | %s | Entry: %.2f | SL: %.2f | T1: %.2f | T2: %.2f | Conf: %d%%",
                 signal.getSignalType(), signal.getDirection(), stock.getSymbol(),
                 signal.getEntryPrice(), signal.getStopLoss(),
                 signal.getTargetPrice(), signal.getTarget2(),
                 signal.getConfidence());
+
+        if (signal.getSignalType() == pl.piomin.signalmind.signal.domain.SignalType.GAP_FILL_SHORT) {
+            return base + "\n⚠️ " + GapFillShortDetector.BROKER_NOTE;
+        }
+        return base;
     }
 }

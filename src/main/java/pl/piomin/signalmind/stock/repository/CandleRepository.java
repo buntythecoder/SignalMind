@@ -61,4 +61,18 @@ public interface CandleRepository extends JpaRepository<Candle, CandleId> {
             LIMIT 1
             """)
     Optional<Candle> findLatestCandle(@Param("stockId") Long stockId);
+
+    /**
+     * Returns the most-recent candle for a stock strictly before the given instant.
+     * Used by gap-fill detectors (SM-25) to find the previous session's closing price.
+     */
+    @Query("""
+            SELECT c FROM Candle c
+            WHERE c.stock.id = :stockId
+              AND c.candleTime < :before
+            ORDER BY c.candleTime DESC
+            LIMIT 1
+            """)
+    Optional<Candle> findPrevSessionClose(@Param("stockId") Long stockId,
+                                           @Param("before") Instant before);
 }

@@ -54,10 +54,10 @@ class FlywayMigrationIT {
     // ── Flyway history ────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Flyway applies exactly 6 migrations (V1-V6) with no failures")
-    void flyway_sixMigrationsAppliedSuccessfully() {
+    @DisplayName("Flyway applies exactly 7 migrations (V1-V7) with no failures")
+    void flyway_sevenMigrationsAppliedSuccessfully() {
         MigrationInfo[] applied = flyway.info().applied();
-        assertEquals(6, applied.length, "Expected V1 through V6 to be applied");
+        assertEquals(7, applied.length, "Expected V1 through V7 to be applied");
         for (MigrationInfo m : applied) {
             assertEquals(
                     MigrationState.SUCCESS, m.getState(),
@@ -185,7 +185,33 @@ class FlywayMigrationIT {
         // stocks, market_holidays, candles, candles_2024_01, candles_2024_02,
         // volume_baselines, signals, users, audit_log = 9
         // (spring_batch_* tables are excluded by the NOT LIKE 'batch_%' filter)
-        assertEquals(9, count, "Expected 9 business tables in public schema after V1-V6 migrations");
+        // V7 is a data-only migration (holiday seed) — no new tables
+        assertEquals(9, count, "Expected 9 business tables in public schema after V1-V7 migrations");
+    }
+
+    // ── V7: holiday seed ──────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("V7: market_holidays seeded with 2025-2026 NSE holidays")
+    void v7_marketHolidaysSeeded() {
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM market_holidays", Integer.class);
+        assertTrue(count != null && count >= 20,
+                "Expected at least 20 seeded holidays (14 for 2025 + 11 for 2026), got: " + count);
+    }
+
+    @Test
+    @DisplayName("V7: known 2025 holidays are present — Good Friday and Diwali Laxmi Puja")
+    void v7_specific2025HolidaysPresent() {
+        Integer goodFriday = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM market_holidays WHERE holiday_date = '2025-04-18'",
+                Integer.class);
+        assertEquals(1, goodFriday, "Good Friday 2025 should be seeded");
+
+        Integer diwali = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM market_holidays WHERE holiday_date = '2025-10-20'",
+                Integer.class);
+        assertEquals(1, diwali, "Diwali 2025 Laxmi Puja should be seeded");
     }
 
     // ── Seed verification ─────────────────────────────────────────────────────

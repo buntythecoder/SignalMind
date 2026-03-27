@@ -54,10 +54,10 @@ class FlywayMigrationIT {
     // ── Flyway history ────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Flyway applies exactly 13 migrations (V1-V13) with no failures")
+    @DisplayName("Flyway applies exactly 14 migrations (V1-V14) with no failures")
     void flyway_eightMigrationsAppliedSuccessfully() {
         MigrationInfo[] applied = flyway.info().applied();
-        assertEquals(13, applied.length, "Expected V1 through V13 to be applied");
+        assertEquals(14, applied.length, "Expected V1 through V14 to be applied");
         for (MigrationInfo m : applied) {
             assertEquals(
                     MigrationState.SUCCESS, m.getState(),
@@ -200,7 +200,7 @@ class FlywayMigrationIT {
     // ── Total table count ─────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Schema contains exactly 10 business tables (8 core + 2 partitions); excludes flyway_schema_history")
+    @DisplayName("Schema contains exactly 11 business tables (8 core + 2 partitions + signal_feedback); excludes flyway_schema_history")
     void schema_correctTotalTableCount() {
         Integer count = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "
@@ -210,9 +210,23 @@ class FlywayMigrationIT {
                         + "  AND table_name NOT LIKE 'batch_%'",
                 Integer.class);
         // stocks, market_holidays, candles, candles_2024_01, candles_2024_02,
-        // volume_baselines, signals, users, audit_log, signal_type_config = 10
+        // volume_baselines, signals, users, audit_log, signal_type_config, signal_feedback = 11
         // (spring_batch_* tables are excluded by the NOT LIKE 'batch_%' filter)
-        assertEquals(10, count, "Expected 10 business tables in public schema after V1-V13 migrations");
+        assertEquals(11, count, "Expected 11 business tables in public schema after V1-V14 migrations");
+    }
+
+    // ── V14: signal_feedback ──────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("V14: signal_feedback table exists with correct constraints")
+    void v14_signalFeedbackTable() {
+        assertTableExists("signal_feedback");
+        assertColumnExists("signal_feedback", "signal_id");
+        assertColumnExists("signal_feedback", "chat_id");
+        assertColumnExists("signal_feedback", "feedback_type");
+        assertColumnExists("signal_feedback", "recorded_at");
+        assertConstraintExists("uq_signal_feedback");
+        assertConstraintExists("chk_feedback_type");
     }
 
     // ── V7: holiday seed ──────────────────────────────────────────────────────

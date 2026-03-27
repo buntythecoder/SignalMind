@@ -11,6 +11,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -64,7 +65,18 @@ public class TelegramDispatcherService {
      * @param text   HTML-formatted message body
      */
     public void enqueue(String chatId, String text) {
-        QueuedMessage msg = new QueuedMessage(chatId, text, 0, 0L);
+        enqueue(chatId, text, null);
+    }
+
+    /**
+     * Serialize {@code text} for {@code chatId} with an optional inline keyboard and RPUSH it onto the main queue.
+     *
+     * @param chatId           Telegram chat ID (numeric string)
+     * @param text             HTML-formatted message body
+     * @param replyMarkupJson  Telegram InlineKeyboardMarkup JSON string; may be null
+     */
+    public void enqueue(String chatId, String text, String replyMarkupJson) {
+        QueuedMessage msg = new QueuedMessage(chatId, text, 0, 0L, replyMarkupJson);
         try {
             String json = objectMapper.writeValueAsString(msg);
             redis.opsForList().rightPush(QUEUE_KEY, json);
@@ -113,7 +125,7 @@ public class TelegramDispatcherService {
         }
 
         // ── Dispatch ───────────────────────────────────────────────────────────
-        boolean success = sendToTelegram(msg.chatId(), msg.text());
+        boolean success = sendToTelegram(msg.chatId(), msg.text(), msg.replyMarkup());
         if (success) {
             dispatchedThisSecond++;
         } else {
@@ -122,7 +134,8 @@ public class TelegramDispatcherService {
                 QueuedMessage retry = new QueuedMessage(
                         msg.chatId(), msg.text(),
                         msg.attempts() + 1,
-                        System.currentTimeMillis() + RETRY_BACKOFF_MS);
+                        System.currentTimeMillis() + RETRY_BACKOFF_MS,
+                        msg.replyMarkup());
                 pushRetryToFront(retry);
             } else {
                 // Exhausted — send to DLQ
@@ -142,7 +155,7 @@ public class TelegramDispatcherService {
         while ((json = redis.opsForList().leftPop(DLQ_KEY)) != null) {
             try {
                 QueuedMessage dead = objectMapper.readValue(json, QueuedMessage.class);
-                QueuedMessage fresh = new QueuedMessage(dead.chatId(), dead.text(), 0, 0L);
+                QueuedMessage fresh = new QueuedMessage(dead.chatId(), dead.text(), 0, 0L, dead.replyMarkup());
                 String freshJson = objectMapper.writeValueAsString(fresh);
                 redis.opsForList().rightPush(QUEUE_KEY, freshJson);
                 log.info("[telegram-dispatcher] Re-enqueued DLQ message for chatId={}", dead.chatId());
@@ -157,18 +170,26 @@ public class TelegramDispatcherService {
     /**
      * Calls the Telegram Bot API {@code sendMessage} endpoint.
      *
-     * @param chatId recipient chat ID
-     * @param text   HTML message body
+     * @param chatId           recipient chat ID
+     * @param text             HTML message body
+     * @param replyMarkupJson  Telegram InlineKeyboardMarkup JSON string; may be null
      * @return {@code true} if the call succeeded, {@code false} on any error
      */
-    boolean sendToTelegram(String chatId, String text) {
+    boolean sendToTelegram(String chatId, String text, String replyMarkupJson) {
         try {
             String url = "https://api.telegram.org/bot" + props.getBotToken() + "/sendMessage";
-            Map<String, String> body = Map.of(
-                    "chat_id",    chatId,
-                    "text",       text,
-                    "parse_mode", "HTML"
-            );
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("chat_id",    chatId);
+            body.put("text",       text);
+            body.put("parse_mode", "HTML");
+            if (replyMarkupJson != null && !replyMarkupJson.isBlank()) {
+                try {
+                    body.put("reply_markup", objectMapper.readTree(replyMarkupJson));
+                } catch (Exception parseEx) {
+                    log.warn("[telegram-dispatcher] Could not parse replyMarkupJson for chatId={}, sending without keyboard: {}",
+                            chatId, parseEx.getMessage());
+                }
+            }
             restClient.post()
                     .uri(url)
                     .body(body)
@@ -179,6 +200,25 @@ public class TelegramDispatcherService {
         } catch (Exception e) {
             log.warn("[telegram-dispatcher] Send failed for chatId={}: {}", chatId, e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Answers a Telegram callback query to remove the "loading" spinner from the button.
+     * Fire-and-forget; failures are only logged as warnings.
+     *
+     * @param callbackQueryId the callback query ID from the incoming update
+     */
+    public void answerCallbackQuery(String callbackQueryId) {
+        try {
+            String url = "https://api.telegram.org/bot" + props.getBotToken() + "/answerCallbackQuery";
+            restClient.post()
+                    .uri(url)
+                    .body(Map.of("callback_query_id", callbackQueryId))
+                    .retrieve()
+                    .toBodilessEntity();
+        } catch (Exception e) {
+            log.warn("[telegram-dispatcher] Failed to answer callback {}: {}", callbackQueryId, e.getMessage());
         }
     }
 
@@ -213,6 +253,7 @@ public class TelegramDispatcherService {
             @com.fasterxml.jackson.annotation.JsonProperty("chatId")       String chatId,
             @com.fasterxml.jackson.annotation.JsonProperty("text")         String text,
             @com.fasterxml.jackson.annotation.JsonProperty("attempts")     int    attempts,
-            @com.fasterxml.jackson.annotation.JsonProperty("retryAfterMs") long   retryAfterMs
+            @com.fasterxml.jackson.annotation.JsonProperty("retryAfterMs") long   retryAfterMs,
+            @com.fasterxml.jackson.annotation.JsonProperty("replyMarkup")  String replyMarkup
     ) {}
 }

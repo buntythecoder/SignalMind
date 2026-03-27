@@ -90,7 +90,7 @@ class TelegramDispatcherServiceTest {
     @Test
     void processQueue_sendsMessage_andIncrementsRateCounter() throws Exception {
         TelegramDispatcherService.QueuedMessage msg =
-                new TelegramDispatcherService.QueuedMessage("42", "hi", 0, 0L);
+                new TelegramDispatcherService.QueuedMessage("42", "hi", 0, 0L, null);
         String json = "{\"chatId\":\"42\",\"text\":\"hi\",\"attempts\":0,\"retryAfterMs\":0}";
 
         when(listOps.leftPop(TelegramDispatcherService.QUEUE_KEY)).thenReturn(json);
@@ -98,11 +98,11 @@ class TelegramDispatcherServiceTest {
 
         // Spy the dispatcher so we can stub sendToTelegram without making real HTTP calls
         TelegramDispatcherService spy = spy(dispatcher);
-        doReturn(true).when(spy).sendToTelegram("42", "hi");
+        doReturn(true).when(spy).sendToTelegram("42", "hi", null);
 
         spy.processQueue();
 
-        verify(spy).sendToTelegram("42", "hi");
+        verify(spy).sendToTelegram("42", "hi", null);
         // Rate counter is an internal field — we verify no re-push happened (success path)
         verify(listOps, never()).rightPush(anyString(), anyString());
         verify(listOps, never()).leftPush(anyString(), anyString());
@@ -114,7 +114,7 @@ class TelegramDispatcherServiceTest {
     void processQueue_pushesBack_whenRetryAfterMsIsInFuture() throws Exception {
         long futureMs = System.currentTimeMillis() + 60_000L;
         TelegramDispatcherService.QueuedMessage msg =
-                new TelegramDispatcherService.QueuedMessage("42", "hi", 1, futureMs);
+                new TelegramDispatcherService.QueuedMessage("42", "hi", 1, futureMs, null);
         String json = "{...}";
 
         when(listOps.leftPop(TelegramDispatcherService.QUEUE_KEY)).thenReturn(json);
@@ -125,7 +125,7 @@ class TelegramDispatcherServiceTest {
 
         // Message must be put back; sendToTelegram must NOT be called
         verify(listOps).rightPush(eq(TelegramDispatcherService.QUEUE_KEY), eq(json));
-        verify(spy, never()).sendToTelegram(anyString(), anyString());
+        verify(spy, never()).sendToTelegram(anyString(), anyString(), any());
     }
 
     // ── processQueue — send fails, attempts < MAX_ATTEMPTS-1 ──────────────────
@@ -133,7 +133,7 @@ class TelegramDispatcherServiceTest {
     @Test
     void processQueue_lpushRetry_whenSendFailsAndAttemptsBelow_MAX() throws Exception {
         TelegramDispatcherService.QueuedMessage msg =
-                new TelegramDispatcherService.QueuedMessage("42", "hi", 0, 0L);
+                new TelegramDispatcherService.QueuedMessage("42", "hi", 0, 0L, null);
         String json = "{\"chatId\":\"42\",\"text\":\"hi\",\"attempts\":0,\"retryAfterMs\":0}";
 
         when(listOps.leftPop(TelegramDispatcherService.QUEUE_KEY)).thenReturn(json);
@@ -144,7 +144,7 @@ class TelegramDispatcherServiceTest {
         when(objectMapper.writeValueAsString(any())).thenReturn(retryJson);
 
         TelegramDispatcherService spy = spy(dispatcher);
-        doReturn(false).when(spy).sendToTelegram("42", "hi");
+        doReturn(false).when(spy).sendToTelegram("42", "hi", null);
 
         spy.processQueue();
 
@@ -160,14 +160,14 @@ class TelegramDispatcherServiceTest {
     void processQueue_rpushToDlq_whenSendFailsAndAttemptsExhausted() throws Exception {
         int exhausted = TelegramDispatcherService.MAX_ATTEMPTS - 1;
         TelegramDispatcherService.QueuedMessage msg =
-                new TelegramDispatcherService.QueuedMessage("42", "hi", exhausted, 0L);
+                new TelegramDispatcherService.QueuedMessage("42", "hi", exhausted, 0L, null);
         String json = "{\"chatId\":\"42\",\"text\":\"hi\",\"attempts\":2,\"retryAfterMs\":0}";
 
         when(listOps.leftPop(TelegramDispatcherService.QUEUE_KEY)).thenReturn(json);
         when(objectMapper.readValue(json, TelegramDispatcherService.QueuedMessage.class)).thenReturn(msg);
 
         TelegramDispatcherService spy = spy(dispatcher);
-        doReturn(false).when(spy).sendToTelegram("42", "hi");
+        doReturn(false).when(spy).sendToTelegram("42", "hi", null);
 
         spy.processQueue();
 
@@ -186,7 +186,7 @@ class TelegramDispatcherServiceTest {
         String freshJson = "{\"chatId\":\"42\",\"text\":\"hi\",\"attempts\":0,\"retryAfterMs\":0}";
 
         TelegramDispatcherService.QueuedMessage dead =
-                new TelegramDispatcherService.QueuedMessage("42", "hi", 2, 0L);
+                new TelegramDispatcherService.QueuedMessage("42", "hi", 2, 0L, null);
 
         // Return item once, then null to stop the loop
         when(listOps.leftPop(TelegramDispatcherService.DLQ_KEY))

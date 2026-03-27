@@ -4,9 +4,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import pl.piomin.signalmind.integration.telegram.TelegramAlertFormatter;
 import pl.piomin.signalmind.integration.telegram.TelegramAlertService;
 import pl.piomin.signalmind.regime.service.MarketRegimeService;
-import pl.piomin.signalmind.signal.detector.GapFillShortDetector;
 import pl.piomin.signalmind.signal.detector.SignalDetector;
 import pl.piomin.signalmind.signal.domain.Signal;
 import pl.piomin.signalmind.signal.domain.SignalType;
@@ -79,6 +79,7 @@ public class SignalEngineService {
     private final ConfidenceScoringService scoringService;
     private final Optional<SignalTypeConfigService> configService;
     private final Optional<SignalDeduplicationService> deduplicationService;
+    private final TelegramAlertFormatter formatter;
 
     /**
      * Per-minute dispatch counter (SM-27: max 5 dispatches per minute).
@@ -96,7 +97,8 @@ public class SignalEngineService {
                                Optional<MarketRegimeService> regimeService,
                                ConfidenceScoringService scoringService,
                                Optional<SignalTypeConfigService> configService,
-                               Optional<SignalDeduplicationService> deduplicationService) {
+                               Optional<SignalDeduplicationService> deduplicationService,
+                               TelegramAlertFormatter formatter) {
         this.detectors             = detectors;
         this.stockRepository       = stockRepository;
         this.candleRepository      = candleRepository;
@@ -107,6 +109,7 @@ public class SignalEngineService {
         this.scoringService        = scoringService;
         this.configService         = configService;
         this.deduplicationService  = deduplicationService;
+        this.formatter             = formatter;
     }
 
     // ── Scheduled run ─────────────────────────────────────────────────────────
@@ -229,7 +232,11 @@ public class SignalEngineService {
                 if (signal.getConfidence() >= DISPATCH_CONFIDENCE_GATE
                         && !dailyBudgetExhausted
                         && minuteDispatchCount.get() < MAX_DISPATCHED_PER_MINUTE) {
-                    telegram.sendAlert(formatAlert(signal, stock));
+                    long stockCountToday = signalRepository
+                            .countByStockAndGeneratedAtBetween(stock, sessionStart, sessionEnd);
+                    TelegramAlertFormatter.FormattedAlert formatted =
+                            formatter.format(signal, stock, stockCountToday);
+                    telegram.sendAlertWithKeyboard(formatted.text(), formatted.replyMarkupJson());
                     signal.markDispatched(Instant.now());
                     signalRepository.save(signal); // persist dispatch timestamp
                     minuteDispatchCount.incrementAndGet();
@@ -275,21 +282,5 @@ public class SignalEngineService {
         return baselines;
     }
 
-    /**
-     * Formats a Telegram alert message for a generated signal.
-     * GAP_FILL_SHORT signals include a broker note about intraday short-selling requirements.
-     */
-    private String formatAlert(Signal signal, Stock stock) {
-        String base = String.format(
-                "📊 %s %s | %s | Entry: %.2f | SL: %.2f | T1: %.2f | T2: %.2f | Conf: %d%%",
-                signal.getSignalType(), signal.getDirection(), stock.getSymbol(),
-                signal.getEntryPrice(), signal.getStopLoss(),
-                signal.getTargetPrice(), signal.getTarget2(),
-                signal.getConfidence());
 
-        if (signal.getSignalType() == SignalType.GAP_FILL_SHORT) {
-            return base + "\n⚠️ " + GapFillShortDetector.BROKER_NOTE;
-        }
-        return base;
-    }
 }

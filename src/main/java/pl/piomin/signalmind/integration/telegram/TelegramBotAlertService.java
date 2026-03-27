@@ -104,6 +104,42 @@ public class TelegramBotAlertService implements TelegramAlertService {
         }
     }
 
+    /**
+     * Sends {@code message} with an inline keyboard to all configured recipients (SM-29).
+     *
+     * <p>Uses the dispatcher queue when available, falling back to a plain direct send
+     * (without the keyboard) when Redis is absent.
+     *
+     * @param message          alert text (HTML)
+     * @param replyMarkupJson  Telegram InlineKeyboardMarkup JSON string; may be null
+     */
+    @Override
+    public void sendAlertWithKeyboard(String message, String replyMarkupJson) {
+        Set<String> recipients = new HashSet<>();
+
+        String staticChatId = props.getChatId();
+        if (staticChatId != null && !staticChatId.isBlank()) {
+            recipients.add(staticChatId);
+        }
+
+        subscriberService
+                .map(TelegramSubscriberService::getSubscribers)
+                .ifPresent(recipients::addAll);
+
+        if (recipients.isEmpty()) {
+            log.warn("[telegram] sendAlertWithKeyboard called but no recipients configured — message suppressed");
+            return;
+        }
+
+        for (String chatId : recipients) {
+            if (dispatcher.isPresent()) {
+                dispatcher.get().enqueue(chatId, message, replyMarkupJson);
+            } else {
+                sendDirect(chatId, message);
+            }
+        }
+    }
+
     @Override
     public boolean isAvailable() {
         return true;

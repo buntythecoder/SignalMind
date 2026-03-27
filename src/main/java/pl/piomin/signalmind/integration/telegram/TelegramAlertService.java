@@ -21,6 +21,20 @@ public interface TelegramAlertService {
     void sendAlert(String message);
 
     /**
+     * Sends an alert with an inline keyboard attached (SM-29).
+     *
+     * <p>The default implementation delegates to {@link #sendAlert(String)}, discarding
+     * the keyboard JSON.  Implementations that support inline keyboards should override
+     * this method to pass {@code replyMarkupJson} to the dispatcher.
+     *
+     * @param message          the alert text (HTML)
+     * @param replyMarkupJson  Telegram InlineKeyboardMarkup JSON string; may be null
+     */
+    default void sendAlertWithKeyboard(String message, String replyMarkupJson) {
+        sendAlert(message);
+    }
+
+    /**
      * Returns {@code true} if a real notification channel is wired up and messages
      * will actually be delivered, {@code false} for the no-op fallback.
      */

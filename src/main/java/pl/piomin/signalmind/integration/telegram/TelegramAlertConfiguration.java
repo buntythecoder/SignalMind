@@ -1,6 +1,7 @@
 package pl.piomin.signalmind.integration.telegram;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -13,8 +14,11 @@ import org.springframework.context.annotation.Configuration;
  * {@code @ConditionalOnMissingBean} is evaluated after all component-scanned
  * beans are registered — which is the correct and reliable way to use this
  * annotation (as opposed to placing it directly on a {@code @Service}).
+ *
+ * <p>Also enables {@link TelegramProperties} binding via {@code @ConfigurationProperties}.
  */
 @Configuration
+@EnableConfigurationProperties(TelegramProperties.class)
 public class TelegramAlertConfiguration {
 
     @Bean

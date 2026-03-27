@@ -15,6 +15,7 @@ import pl.piomin.signalmind.stock.domain.Stock;
 import pl.piomin.signalmind.stock.repository.CandleRepository;
 import pl.piomin.signalmind.stock.repository.StockRepository;
 import pl.piomin.signalmind.stock.repository.VolumeBaselineRepository;
+import pl.piomin.signalmind.signal.service.ConfidenceScoringService;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -64,6 +65,7 @@ public class SignalEngineService {
     private final SignalRepository signalRepository;
     private final TelegramAlertService telegram;
     private final Optional<MarketRegimeService> regimeService;
+    private final ConfidenceScoringService scoringService;
 
     public SignalEngineService(List<SignalDetector> detectors,
                                StockRepository stockRepository,
@@ -71,7 +73,8 @@ public class SignalEngineService {
                                VolumeBaselineRepository volumeBaselineRepository,
                                SignalRepository signalRepository,
                                TelegramAlertService telegram,
-                               Optional<MarketRegimeService> regimeService) {
+                               Optional<MarketRegimeService> regimeService,
+                               ConfidenceScoringService scoringService) {
         this.detectors = detectors;
         this.stockRepository = stockRepository;
         this.candleRepository = candleRepository;
@@ -79,6 +82,7 @@ public class SignalEngineService {
         this.signalRepository = signalRepository;
         this.telegram = telegram;
         this.regimeService = regimeService;
+        this.scoringService = scoringService;
     }
 
     // ── Scheduled run ─────────────────────────────────────────────────────────
@@ -133,10 +137,26 @@ public class SignalEngineService {
 
                 Optional<Signal> result = detector.detect(stock, candles, baselines, regime);
                 result.ifPresent(signal -> {
+                    // SM-26: apply 6-factor confidence scoring before persistence
+                    Instant triggerTime = signal.getGeneratedAt();
+                    Candle triggerCandle = candles.stream()
+                            .filter(c -> c.getCandleTime().equals(triggerTime))
+                            .findFirst()
+                            .orElse(candles.isEmpty() ? null : candles.get(0));
+                    long volume = triggerCandle != null ? triggerCandle.getVolume() : 0L;
+                    LocalTime slot = triggerTime.atZone(IST).toLocalTime();
+                    Long baseline = baselines.get(slot);
+                    scoringService.score(signal, volume, baseline);
+
                     signalRepository.save(signal);
-                    log.info("[signal-engine] {} {} {} signal for {} entry={} confidence={} valid_until={}",
+                    log.info("[signal-engine] {} {} {} signal for {} entry={} confidence={} " +
+                                    "(base={} vol={} tod={} reg={} wr={} conf={}) valid_until={}",
                             signal.getSignalType(), signal.getDirection(), stock.getSymbol(),
-                            signal.getEntryPrice(), signal.getConfidence(), signal.getValidUntil());
+                            signal.getEntryPrice(), signal.getConfidence(),
+                            signal.getScoreBase(), signal.getScoreVolume(),
+                            signal.getScoreTimeOfDay(), signal.getScoreRegime(),
+                            signal.getScoreWinRate(), signal.getScoreConfluence(),
+                            signal.getValidUntil());
 
                     if (signal.getConfidence() >= DISPATCH_CONFIDENCE_GATE) {
                         telegram.sendAlert(formatAlert(signal, stock));

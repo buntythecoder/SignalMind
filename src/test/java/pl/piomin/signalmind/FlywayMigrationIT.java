@@ -54,10 +54,10 @@ class FlywayMigrationIT {
     // ── Flyway history ────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Flyway applies exactly 11 migrations (V1-V11) with no failures")
+    @DisplayName("Flyway applies exactly 12 migrations (V1-V12) with no failures")
     void flyway_eightMigrationsAppliedSuccessfully() {
         MigrationInfo[] applied = flyway.info().applied();
-        assertEquals(11, applied.length, "Expected V1 through V11 to be applied");
+        assertEquals(12, applied.length, "Expected V1 through V12 to be applied");
         for (MigrationInfo m : applied) {
             assertEquals(
                     MigrationState.SUCCESS, m.getState(),
@@ -168,6 +168,18 @@ class FlywayMigrationIT {
         assertColumnExists("audit_log", "event_type");
         assertColumnExists("audit_log", "entity_type");
         assertColumnExists("audit_log", "entity_id");
+    }
+
+    // ── V12: confidence score columns ─────────────────────────────────────────
+
+    @Test
+    @DisplayName("V12: signals table has six score breakdown columns")
+    void v12_signalsHasScoreColumns() {
+        for (String col : new String[]{
+                "score_base", "score_volume", "score_time_of_day",
+                "score_regime", "score_win_rate", "score_confluence"}) {
+            assertColumnExists("signals", col);
+        }
     }
 
     // ── Total table count ─────────────────────────────────────────────────────

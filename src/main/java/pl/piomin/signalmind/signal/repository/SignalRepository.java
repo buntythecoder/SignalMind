@@ -52,4 +52,19 @@ public interface SignalRepository extends JpaRepository<Signal, Long> {
      * @return non-dispatched, still-valid signals ordered oldest-generated first
      */
     List<Signal> findByDispatchedFalseAndValidUntilAfterOrderByGeneratedAtAsc(Instant now);
+
+    /**
+     * Finds all signals generated for a stock within the given time window.
+     * Used by the SM-26 Confidence Scoring Engine to detect multi-signal
+     * confluence: a second or third signal for the same stock within 5 minutes
+     * earns a confluence bonus.
+     *
+     * @param stock the stock to check
+     * @param from  window start (inclusive)
+     * @param to    window end (exclusive)
+     * @return signals for this stock within the window, ordered by generation time
+     */
+    List<Signal> findByStockAndGeneratedAtBetweenOrderByGeneratedAtAsc(Stock stock,
+                                                                         Instant from,
+                                                                         Instant to);
 }

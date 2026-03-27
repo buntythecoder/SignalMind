@@ -84,6 +84,32 @@ public class Signal {
     @Column(name = "orb_low", precision = 12, scale = 2)
     private BigDecimal orbLow;
 
+    // ── SM-26 Confidence Scoring breakdown ────────────────────────────────────
+
+    /** Base pattern-quality component of the confidence score (SM-26). Null until {@link #applyScores} is called. */
+    @Column(name = "score_base")
+    private Integer scoreBase;
+
+    /** Volume-confirmation component of the confidence score (SM-26). Null until {@link #applyScores} is called. */
+    @Column(name = "score_volume")
+    private Integer scoreVolume;
+
+    /** Time-of-day component of the confidence score (SM-26). Null until {@link #applyScores} is called. */
+    @Column(name = "score_time_of_day")
+    private Integer scoreTimeOfDay;
+
+    /** Market-regime component of the confidence score (SM-26). Null until {@link #applyScores} is called. */
+    @Column(name = "score_regime")
+    private Integer scoreRegime;
+
+    /** Historical win-rate component of the confidence score (SM-26). Null until {@link #applyScores} is called. */
+    @Column(name = "score_win_rate")
+    private Integer scoreWinRate;
+
+    /** Multi-indicator confluence component of the confidence score (SM-26). Null until {@link #applyScores} is called. */
+    @Column(name = "score_confluence")
+    private Integer scoreConfluence;
+
     // ── Constructors ──────────────────────────────────────────────────────────
 
     /** Required by JPA. Not for application use. */
@@ -138,6 +164,29 @@ public class Signal {
     public void markDispatched(Instant now) {
         this.dispatched = true;
         this.dispatchedAt = now;
+    }
+
+    // ── SM-26 Confidence Scoring ──────────────────────────────────────────────
+
+    /**
+     * Applies the SM-26 confidence scoring breakdown.
+     * Overwrites the rough confidence set at construction time with the fully-scored value.
+     *
+     * @param base       base pattern-quality points
+     * @param volume     volume-confirmation points
+     * @param timeOfDay  time-of-day points
+     * @param regime     market-regime points
+     * @param winRate    historical win-rate points
+     * @param confluence multi-indicator confluence points
+     */
+    public void applyScores(int base, int volume, int timeOfDay, int regime, int winRate, int confluence) {
+        this.scoreBase = base;
+        this.scoreVolume = volume;
+        this.scoreTimeOfDay = timeOfDay;
+        this.scoreRegime = regime;
+        this.scoreWinRate = winRate;
+        this.scoreConfluence = confluence;
+        this.confidence = Math.min(100, base + volume + timeOfDay + regime + winRate + confluence);
     }
 
     // ── Setters (dispatch only) ───────────────────────────────────────────────
@@ -214,6 +263,30 @@ public class Signal {
 
     public BigDecimal getOrbLow() {
         return orbLow;
+    }
+
+    public Integer getScoreBase() {
+        return scoreBase;
+    }
+
+    public Integer getScoreVolume() {
+        return scoreVolume;
+    }
+
+    public Integer getScoreTimeOfDay() {
+        return scoreTimeOfDay;
+    }
+
+    public Integer getScoreRegime() {
+        return scoreRegime;
+    }
+
+    public Integer getScoreWinRate() {
+        return scoreWinRate;
+    }
+
+    public Integer getScoreConfluence() {
+        return scoreConfluence;
     }
 
     @Override

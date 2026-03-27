@@ -15,6 +15,8 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.Instant;
 
+// SM-19: vwap, vwapUpper, vwapLower, rsi added via V8 migration
+
 /**
  * One-minute OHLCV candle stored in the {@code candles} table.
  *
@@ -64,11 +66,25 @@ public class Candle {
     @Column(name = "source", nullable = false, length = 10)
     private CandleSource source = CandleSource.HIST;
 
+    // SM-19: indicator columns (nullable — HIST candles have no indicators)
+    @Column(name = "vwap", precision = 12, scale = 4)
+    private BigDecimal vwap;
+
+    @Column(name = "vwap_upper", precision = 12, scale = 4)
+    private BigDecimal vwapUpper;
+
+    @Column(name = "vwap_lower", precision = 12, scale = 4)
+    private BigDecimal vwapLower;
+
+    @Column(name = "rsi", precision = 6, scale = 2)
+    private BigDecimal rsi;
+
     // ── Constructors ──────────────────────────────────────────────────────────
 
     protected Candle() {
     }
 
+    /** HIST candle constructor — indicators left null. */
     public Candle(Stock stock, Instant candleTime,
                   BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close,
                   long volume, CandleSource source) {
@@ -80,6 +96,25 @@ public class Candle {
         this.close = close;
         this.volume = volume;
         this.source = source;
+    }
+
+    /** LIVE candle constructor — all OHLCV + indicator fields provided (SM-19). */
+    public Candle(Stock stock, Instant candleTime,
+                  BigDecimal open, BigDecimal high, BigDecimal low, BigDecimal close,
+                  long volume, CandleSource source,
+                  BigDecimal vwap, BigDecimal vwapUpper, BigDecimal vwapLower, BigDecimal rsi) {
+        this.stock = stock;
+        this.candleTime = candleTime;
+        this.open = open;
+        this.high = high;
+        this.low = low;
+        this.close = close;
+        this.volume = volume;
+        this.source = source;
+        this.vwap = vwap;
+        this.vwapUpper = vwapUpper;
+        this.vwapLower = vwapLower;
+        this.rsi = rsi;
     }
 
     // ── Getters ───────────────────────────────────────────────────────────────
@@ -118,6 +153,22 @@ public class Candle {
 
     public CandleSource getSource() {
         return source;
+    }
+
+    public BigDecimal getVwap() {
+        return vwap;
+    }
+
+    public BigDecimal getVwapUpper() {
+        return vwapUpper;
+    }
+
+    public BigDecimal getVwapLower() {
+        return vwapLower;
+    }
+
+    public BigDecimal getRsi() {
+        return rsi;
     }
 
     @Override

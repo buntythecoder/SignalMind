@@ -54,10 +54,10 @@ class FlywayMigrationIT {
     // ── Flyway history ────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Flyway applies exactly 7 migrations (V1-V7) with no failures")
-    void flyway_sevenMigrationsAppliedSuccessfully() {
+    @DisplayName("Flyway applies exactly 8 migrations (V1-V8) with no failures")
+    void flyway_eightMigrationsAppliedSuccessfully() {
         MigrationInfo[] applied = flyway.info().applied();
-        assertEquals(7, applied.length, "Expected V1 through V7 to be applied");
+        assertEquals(8, applied.length, "Expected V1 through V8 to be applied");
         for (MigrationInfo m : applied) {
             assertEquals(
                     MigrationState.SUCCESS, m.getState(),

@@ -8,6 +8,7 @@ import pl.piomin.signalmind.stock.domain.CandleId;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 public interface CandleRepository extends JpaRepository<Candle, CandleId> {
 
@@ -36,4 +37,28 @@ public interface CandleRepository extends JpaRepository<Candle, CandleId> {
             LIMIT :n
             """)
     List<Candle> findLatestByStock(@Param("stockId") Long stockId, @Param("n") int n);
+
+    /**
+     * Count candles per stock_id for a time range (for daily cross-check, SM-20).
+     * Returns List of Object[] where [0] = stockId (Long), [1] = count (Long).
+     */
+    @Query("""
+            SELECT c.stock.id, COUNT(c)
+            FROM Candle c
+            WHERE c.candleTime >= :start AND c.candleTime < :end
+            GROUP BY c.stock.id
+            """)
+    List<Object[]> countCandlesPerStockBetween(@Param("start") Instant start,
+                                               @Param("end") Instant end);
+
+    /**
+     * Returns the single most-recent candle for a stock (SM-20: synthetic candle prev-close lookup).
+     */
+    @Query("""
+            SELECT c FROM Candle c
+            WHERE c.stock.id = :stockId
+            ORDER BY c.candleTime DESC
+            LIMIT 1
+            """)
+    Optional<Candle> findLatestCandle(@Param("stockId") Long stockId);
 }

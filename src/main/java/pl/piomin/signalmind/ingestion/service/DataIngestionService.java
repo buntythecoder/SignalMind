@@ -10,6 +10,7 @@ import pl.piomin.signalmind.ingestion.domain.ConnectionState;
 import pl.piomin.signalmind.ingestion.domain.MarketTick;
 import pl.piomin.signalmind.ingestion.websocket.AngelOneWebSocketClient;
 import pl.piomin.signalmind.integration.angelone.AngelOneConfig;
+import pl.piomin.signalmind.integration.telegram.TelegramAlertService;
 import pl.piomin.signalmind.market.service.MarketDayStateService;
 import pl.piomin.signalmind.stock.domain.IndexType;
 import pl.piomin.signalmind.stock.domain.Stock;
@@ -38,10 +39,17 @@ public class DataIngestionService implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(DataIngestionService.class);
 
+    /** SM-20: send Telegram alert after this many consecutive reconnect failures. */
+    private static final int ALERT_THRESHOLD = 3;
+
+    /** SM-20: stop the connection loop after this many consecutive reconnect failures. */
+    private static final int MAX_FAILURES = 5;
+
     private final AngelOneConfig config;
     private final StockRepository stockRepository;
     private final List<TickBuffer> tickBuffers;
     private final MarketDayStateService marketDayState;
+    private final TelegramAlertService telegramAlertService;
 
     private final AtomicReference<ConnectionState> stateA = new AtomicReference<>(ConnectionState.DISCONNECTED);
     private final AtomicReference<ConnectionState> stateB = new AtomicReference<>(ConnectionState.DISCONNECTED);
@@ -55,11 +63,13 @@ public class DataIngestionService implements ApplicationRunner {
             AngelOneConfig config,
             StockRepository stockRepository,
             List<TickBuffer> tickBuffers,
-            MarketDayStateService marketDayState) {
+            MarketDayStateService marketDayState,
+            TelegramAlertService telegramAlertService) {
         this.config = config;
         this.stockRepository = stockRepository;
         this.tickBuffers = tickBuffers;
         this.marketDayState = marketDayState;
+        this.telegramAlertService = telegramAlertService;
     }
 
     // ── ApplicationRunner ─────────────────────────────────────────────────────
@@ -151,6 +161,7 @@ public class DataIngestionService implements ApplicationRunner {
             String connName) {
 
         int attempts = 0;
+        int consecutiveFailures = 0;
 
         while (running.get()) {
             try {
@@ -158,7 +169,10 @@ public class DataIngestionService implements ApplicationRunner {
                 client.connect();
                 state.set(ConnectionState.CONNECTED);
                 log.info("[ingestion] conn{} CONNECTED", connName);
+
+                // Reset counters on successful connection (SM-20)
                 attempts = 0;
+                consecutiveFailures = 0;
 
                 client.awaitDisconnect();
 
@@ -166,18 +180,39 @@ public class DataIngestionService implements ApplicationRunner {
                     break;
                 }
 
+                // Clean disconnect followed by reconnect counts as a failure (SM-20)
+                consecutiveFailures++;
                 state.set(ConnectionState.RECONNECTING);
                 long delayMs = backoffDelayMs(attempts++);
                 log.warn("[ingestion] conn{} disconnected, reconnecting in {}ms (attempt {})",
                         connName, delayMs, attempts);
+
+                notifyIfThresholdReached(connName, consecutiveFailures, "unexpected disconnect");
+
+                if (consecutiveFailures >= MAX_FAILURES) {
+                    log.error("[ingestion] conn{} reached {} consecutive failures — stopping loop",
+                            connName, consecutiveFailures);
+                    break;
+                }
+
                 Thread.sleep(delayMs);
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 break;
             } catch (Exception e) {
+                consecutiveFailures++;
                 log.error("[ingestion] conn{} failed: {}", connName, e.getMessage(), e);
                 state.set(ConnectionState.RECONNECTING);
+
+                notifyIfThresholdReached(connName, consecutiveFailures, e.getMessage());
+
+                if (consecutiveFailures >= MAX_FAILURES) {
+                    log.error("[ingestion] conn{} reached {} consecutive failures — stopping loop",
+                            connName, consecutiveFailures);
+                    break;
+                }
+
                 try {
                     Thread.sleep(backoffDelayMs(attempts++));
                 } catch (InterruptedException ie) {
@@ -189,6 +224,20 @@ public class DataIngestionService implements ApplicationRunner {
 
         state.set(ConnectionState.DISCONNECTED);
         log.info("[ingestion] conn{} loop exited", connName);
+    }
+
+    /**
+     * Send a Telegram alert exactly once when consecutive failures hit the alert threshold (SM-20).
+     * Fires only at {@code consecutiveFailures == ALERT_THRESHOLD}, not on every subsequent failure,
+     * to avoid flooding the channel.
+     */
+    private void notifyIfThresholdReached(String connName, int consecutiveFailures, String lastError) {
+        if (consecutiveFailures == ALERT_THRESHOLD) {
+            String msg = String.format(
+                    "⚠️ SignalMind conn%s: %d consecutive reconnect failures. Last error: %s",
+                    connName, consecutiveFailures, lastError);
+            telegramAlertService.sendAlert(msg);
+        }
     }
 
     /**

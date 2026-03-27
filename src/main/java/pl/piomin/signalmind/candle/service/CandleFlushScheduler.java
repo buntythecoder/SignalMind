@@ -5,10 +5,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import pl.piomin.signalmind.stock.domain.Stock;
+import pl.piomin.signalmind.stock.repository.StockRepository;
 
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 
 /**
  * Scheduler that drives the 1-minute candle flush cycle and daily VWAP reset.
@@ -29,7 +32,7 @@ import java.time.temporal.ChronoUnit;
  * <p>Only activated when {@code angelone.ingestion.enabled=true}. Absent in all
  * test profiles.
  *
- * <p>SM-19
+ * <p>SM-19 / SM-20
  */
 @Component
 @ConditionalOnProperty(name = "angelone.ingestion.enabled", matchIfMissing = false)
@@ -41,9 +44,12 @@ public class CandleFlushScheduler {
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
     private final MinuteCandleAssembler assembler;
+    private final StockRepository stockRepository;
 
-    public CandleFlushScheduler(MinuteCandleAssembler assembler) {
-        this.assembler = assembler;
+    public CandleFlushScheduler(MinuteCandleAssembler assembler,
+                                StockRepository stockRepository) {
+        this.assembler       = assembler;
+        this.stockRepository = stockRepository;
     }
 
     /**
@@ -60,6 +66,10 @@ public class CandleFlushScheduler {
                 .minus(1, ChronoUnit.MINUTES);
         log.debug("[candle] Flushing minute slot {}", prevMinute);
         assembler.flushMinute(prevMinute);
+
+        // SM-20: generate synthetic candles for any active stock that had no ticks this minute
+        List<Stock> active = stockRepository.findAllByActiveTrue();
+        assembler.flushSynthetics(prevMinute, active);
     }
 
     /**

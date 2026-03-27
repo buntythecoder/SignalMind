@@ -16,6 +16,9 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
 
     List<Stock> findByActiveTrueOrderBySymbolAsc();
 
+    /** Returns all active stocks (unordered). Used by SM-20 synthetic candle and daily verification. */
+    List<Stock> findAllByActiveTrue();
+
     List<Stock> findByIndexTypeAndActiveTrueOrderBySymbolAsc(IndexType indexType);
 
     boolean existsBySymbol(String symbol);

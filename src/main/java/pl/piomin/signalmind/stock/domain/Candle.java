@@ -16,6 +16,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 // SM-19: vwap, vwapUpper, vwapLower, rsi added via V8 migration
+// SM-20: is_synthetic added via V9 migration
 
 /**
  * One-minute OHLCV candle stored in the {@code candles} table.
@@ -79,6 +80,10 @@ public class Candle {
     @Column(name = "rsi", precision = 6, scale = 2)
     private BigDecimal rsi;
 
+    // SM-20: flag for synthetic candles generated when no ticks arrive in a 1-min window
+    @Column(name = "is_synthetic", nullable = false)
+    private boolean synthetic = false;
+
     // ── Constructors ──────────────────────────────────────────────────────────
 
     protected Candle() {
@@ -115,6 +120,23 @@ public class Candle {
         this.vwapUpper = vwapUpper;
         this.vwapLower = vwapLower;
         this.rsi = rsi;
+    }
+
+    /**
+     * Factory for synthetic candles (SM-20).
+     *
+     * <p>A synthetic candle is produced when no ticks arrive in a 1-minute window.
+     * OHLC = prevClose, Volume = 0, isSynthetic = true.
+     * Synthetic candles are persisted for continuity but must NOT trigger signal detection.
+     */
+    public static Candle synthetic(Stock stock, Instant slotStart, BigDecimal prevClose,
+                                   BigDecimal vwap, BigDecimal vwapUpper, BigDecimal vwapLower) {
+        Candle c = new Candle(stock, slotStart,
+                prevClose, prevClose, prevClose, prevClose,
+                0L, CandleSource.LIVE,
+                vwap, vwapUpper, vwapLower, null);
+        c.synthetic = true;
+        return c;
     }
 
     // ── Getters ───────────────────────────────────────────────────────────────
@@ -169,6 +191,10 @@ public class Candle {
 
     public BigDecimal getRsi() {
         return rsi;
+    }
+
+    public boolean isSynthetic() {
+        return synthetic;
     }
 
     @Override

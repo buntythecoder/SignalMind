@@ -15,7 +15,9 @@ import pl.piomin.signalmind.stock.repository.StockRepository;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalTime;
 import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
@@ -42,7 +44,7 @@ import java.util.concurrent.Executors;
  * <p>Only activated when {@code angelone.ingestion.enabled=true}; absent in all
  * non-live profiles so no test mocking is required.
  *
- * <p>SM-19
+ * <p>SM-19 / SM-20
  */
 @Component
 @ConditionalOnProperty(name = "angelone.ingestion.enabled", matchIfMissing = false)
@@ -50,8 +52,13 @@ public class MinuteCandleAssembler {
 
     private static final Logger log = LoggerFactory.getLogger(MinuteCandleAssembler.class);
 
-    @SuppressWarnings("unused")
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+
+    /** NSE session start — 09:15 IST (inclusive). */
+    private static final LocalTime SESSION_START = LocalTime.of(9, 15);
+
+    /** NSE session end — 15:30 IST (exclusive, i.e. last candle slot starts at 15:29). */
+    private static final LocalTime SESSION_END = LocalTime.of(15, 30);
 
     // symbol → accumulator for the current IST minute slot
     private final ConcurrentHashMap<String, CandleAccumulator> accumulators =
@@ -61,19 +68,26 @@ public class MinuteCandleAssembler {
     private final ConcurrentHashMap<String, VwapState> vwapStates =
             new ConcurrentHashMap<>();
 
+    // symbol → last successfully persisted close price (used by synthetic candle lookup, SM-20)
+    private final ConcurrentHashMap<String, BigDecimal> lastKnownClose =
+            new ConcurrentHashMap<>();
+
     private final CandleRepository candleRepository;
     private final StockRepository stockRepository;
     private final Optional<CandleRollingBuffer> rollingBuffer;
+    private final SyntheticCandleGenerator syntheticGenerator;
 
     // Virtual-thread executor for fire-and-forget Redis operations
     private final Executor asyncExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     public MinuteCandleAssembler(CandleRepository candleRepository,
                                  StockRepository stockRepository,
-                                 Optional<CandleRollingBuffer> rollingBuffer) {
-        this.candleRepository = candleRepository;
-        this.stockRepository  = stockRepository;
-        this.rollingBuffer    = rollingBuffer;
+                                 Optional<CandleRollingBuffer> rollingBuffer,
+                                 SyntheticCandleGenerator syntheticGenerator) {
+        this.candleRepository    = candleRepository;
+        this.stockRepository     = stockRepository;
+        this.rollingBuffer       = rollingBuffer;
+        this.syntheticGenerator  = syntheticGenerator;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -128,6 +142,43 @@ public class MinuteCandleAssembler {
         vwapStates.clear();
     }
 
+    /**
+     * Generate and persist synthetic candles for any active stock that produced no real candle
+     * in the given minute slot (SM-20).
+     *
+     * <p>Only runs during the NSE session window (09:15–15:29 IST). Stocks that already had
+     * an accumulator flushed for this slot are excluded. Duplicate inserts are silently ignored
+     * (can occur if the scheduler fires twice due to a race on startup).
+     *
+     * @param minuteSlot  the exact minute-boundary {@link Instant} just flushed
+     * @param activeStocks all currently active stocks to check for gaps
+     */
+    public void flushSynthetics(Instant minuteSlot, List<Stock> activeStocks) {
+        ZonedDateTime slotIST = minuteSlot.atZone(IST);
+        LocalTime slotTime = slotIST.toLocalTime();
+        if (slotTime.isBefore(SESSION_START) || !slotTime.isBefore(SESSION_END)) {
+            return;
+        }
+
+        for (Stock stock : activeStocks) {
+            String sym = stock.getSymbol();
+            // If an accumulator for this symbol is still present, it belongs to the
+            // current (not-yet-flushed) minute — no synthetic needed yet.
+            if (accumulators.containsKey(sym)) {
+                continue;
+            }
+            syntheticGenerator.generate(stock, minuteSlot, vwapStates.get(sym))
+                    .ifPresent(c -> {
+                        try {
+                            candleRepository.save(c);
+                        } catch (Exception e) {
+                            log.warn("[synthetic] Skipping duplicate candle for {} @ {}: {}",
+                                    sym, minuteSlot, e.getMessage());
+                        }
+                    });
+        }
+    }
+
     // ── Private ───────────────────────────────────────────────────────────────
 
     private void persistCandle(String symbol, CandleAccumulator acc) {
@@ -161,7 +212,10 @@ public class MinuteCandleAssembler {
 
             candleRepository.save(candle);
 
-            // Async hook for future SM-20+ frontend streaming over Redis
+            // SM-20: track last known close for synthetic candle generation
+            lastKnownClose.put(symbol, acc.close());
+
+            // Async hook for SM-20+ frontend streaming over Redis
             final Candle saved = candle;
             asyncExecutor.execute(() -> updateRedisRollingCandles(symbol, saved));
 

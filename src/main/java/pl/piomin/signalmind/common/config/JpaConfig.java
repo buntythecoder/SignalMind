@@ -1,17 +1,18 @@
 package pl.piomin.signalmind.common.config;
 
-import jakarta.persistence.EntityManagerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
+/**
+ * JPA / transaction configuration.
+ *
+ * <p>Note: {@code @EnableJpaAuditing} lives on {@link pl.piomin.signalmind.SignalMindApplication}
+ * so it is always processed after Spring Boot's JPA auto-configuration. Unit tests that exclude
+ * JPA must add {@code @MockBean JpaMetamodelMappingContext} to suppress the auditing context.
+ *
+ * <p>HikariCP datasource settings come from {@code application.yml}.
+ */
 @Configuration
-@ConditionalOnBean(EntityManagerFactory.class)
-@EnableJpaAuditing
 @EnableTransactionManagement
 public class JpaConfig {
-    // Only activated when JPA EntityManagerFactory is present (skipped in unit tests).
-    // @EnableJpaAuditing enables @CreatedDate / @LastModifiedDate on entities.
-    // HikariCP datasource settings come from application.yml.
 }

@@ -1,0 +1,27 @@
+# Integration-test profile: real PostgreSQL via Testcontainers, no Redis.
+# Datasource URL/credentials are injected by @DynamicPropertySource in the test.
+
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+  flyway:
+    enabled: true
+    baseline-on-migrate: false   # fresh Testcontainer DB — no prior schema
+    validate-on-migrate: true
+  jpa:
+    hibernate:
+      ddl-auto: validate         # confirms entity mappings match migrated schema
+    show-sql: false
+
+# Fake credentials — real values set in SM-12/SM-13
+angelone:
+  api-key: test-key
+  client-id: test-client
+  mpin: "1234"
+  totp-secret: JBSWY3DPEHPK3PXP
+
+breeze:
+  api-key: test-key
+  api-secret: test-secret

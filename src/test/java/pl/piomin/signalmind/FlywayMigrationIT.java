@@ -14,9 +14,16 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import pl.piomin.signalmind.stock.service.PartitionMaintenanceJob;
 
 import org.springframework.dao.DataIntegrityViolationException;
 
+import java.time.LocalDateTime;
+import java.time.YearMonth;
+import java.time.ZoneId;
+import java.time.Instant;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -375,6 +382,38 @@ class FlywayMigrationIT {
                     "SELECT COUNT(*) FROM stocks WHERE symbol = ?", Integer.class, symbol);
             assertEquals(1, count, "Symbol " + symbol + " should be seeded");
         }
+    }
+
+    // ── SM-46: PartitionMaintenanceJob ────────────────────────────────────────
+
+    @Test
+    @DisplayName("PartitionMaintenanceJob: ensurePartition inserts candle into dynamic partition")
+    void partitionMaintenance_insertsIntoDynamicPartition() {
+        // Arrange: create a partition 2 months in the future (guaranteed not to exist in V2,
+        // which only seeded candles_2024_01 and candles_2024_02)
+        YearMonth future = YearMonth.now(ZoneId.of("Asia/Kolkata")).plusMonths(2);
+        PartitionMaintenanceJob job = new PartitionMaintenanceJob(jdbc);
+        job.ensurePartition(future);
+
+        // Act: insert a candle timestamped in the middle of that future month.
+        // Use java.sql.Timestamp because PostgreSQL JDBC cannot infer the type
+        // for java.time.Instant when passed as a plain Object parameter.
+        LocalDateTime futureTime = future.atDay(15).atTime(10, 15);
+        Instant futureInstant = futureTime.atZone(ZoneId.of("Asia/Kolkata")).toInstant();
+        java.sql.Timestamp futureTs = java.sql.Timestamp.from(futureInstant);
+
+        Long stockId = jdbc.queryForObject("SELECT id FROM stocks LIMIT 1", Long.class);
+
+        jdbc.update(
+                "INSERT INTO candles (stock_id, candle_time, open, high, low, close, volume) " +
+                "VALUES (?,?,?,?,?,?,?)",
+                stockId, futureTs, 100.0, 105.0, 99.0, 103.0, 1000L);
+
+        // Assert: the row landed in the correct partition
+        Integer count = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM " + PartitionMaintenanceJob.partitionName(future),
+                Integer.class);
+        assertThat(count).isEqualTo(1);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

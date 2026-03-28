@@ -8,6 +8,8 @@ import org.springframework.test.context.ActiveProfiles;
 import pl.piomin.signalmind.market.repository.MarketHolidayRepository;
 import pl.piomin.signalmind.signal.repository.SignalOutcomeRepository;
 import pl.piomin.signalmind.stock.repository.CandleRepository;
+import pl.piomin.signalmind.auth.repository.AppUserRepository;
+import pl.piomin.signalmind.auth.repository.RefreshTokenRepository;
 import pl.piomin.signalmind.stock.repository.StockRepository;
 import pl.piomin.signalmind.signal.repository.SignalRepository;
 import pl.piomin.signalmind.stock.repository.VolumeBaselineRepository;
@@ -36,6 +38,12 @@ class SignalMindApplicationTests {
 
     @MockBean
     SignalOutcomeRepository signalOutcomeRepository;
+
+    @MockBean
+    AppUserRepository appUserRepository;
+
+    @MockBean
+    RefreshTokenRepository refreshTokenRepository;
 
     // StockSeedService.run() is @Transactional; with JPA excluded there is no
     // PlatformTransactionManager, so the proxy creation fails. Mock the service

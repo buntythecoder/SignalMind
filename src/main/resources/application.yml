@@ -103,11 +103,11 @@ info:
     version: "@project.version@"
     description: Real-time intraday signal intelligence for NSE/BSE
 
-# ── JWT ────────────────────────────────────────────────────────────────────
+# ── JWT (SM-33) ───────────────────────────────────────────────────────────
 jwt:
-  secret: ${JWT_SECRET:devSecretMustBeAtLeast64BytesLongForHS512AlgorithmSignalMind2024}
-  access-expiry-minutes: ${JWT_ACCESS_EXPIRY_MINUTES:15}
-  refresh-expiry-days: ${JWT_REFRESH_EXPIRY_DAYS:7}
+  secret: ${JWT_SECRET:Y2hhbmdlbWVpbnByb2R1Y3Rpb24hY2hhbmdlbWVpbnByb2R1Y3Rpb24h}
+  access-token-expiry: 900000        # 15 minutes in ms
+  refresh-token-expiry: 604800000    # 7 days in ms
 
 # ── Angel One SmartAPI ─────────────────────────────────────────────────────
 angelone:

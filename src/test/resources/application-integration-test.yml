@@ -25,3 +25,8 @@ angelone:
 breeze:
   api-key: test-key
   api-secret: test-secret
+
+jwt:
+  secret: Y2hhbmdlbWVpbnByb2R1Y3Rpb24hY2hhbmdlbWVpbnByb2R1Y3Rpb24h
+  access-token-expiry: 900000
+  refresh-token-expiry: 604800000

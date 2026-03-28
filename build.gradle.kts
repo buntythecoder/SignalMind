@@ -53,10 +53,10 @@ dependencies {
     // TOTP for Angel One 2FA — hardened in SM-47
     implementation("dev.samstevens.totp:totp-spring-boot-starter:1.7.1")
 
-    // JWT — added in SM-24 (Auth epic)
-    // implementation("io.jsonwebtoken:jjwt-api:0.12.6")
-    // runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")
-    // runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")
+    // JWT — added in SM-24 (Auth epic), uncommented in SM-33
+    implementation("io.jsonwebtoken:jjwt-api:0.12.6")
+    runtimeOnly("io.jsonwebtoken:jjwt-impl:0.12.6")
+    runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.6")
 
     // WebSocket (Angel One SmartAPI feed) — hardened in SM-47
     implementation("org.java-websocket:Java-WebSocket:1.5.7")

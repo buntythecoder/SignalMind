@@ -26,7 +26,7 @@ public class SecurityConfig {
             "/v3/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui.html",
-            "/api/auth/**",
+            "/api/auth/**",           // login, refresh, logout, register, verify-email (SM-34)
             "/api/telegram/webhook"
     };
 

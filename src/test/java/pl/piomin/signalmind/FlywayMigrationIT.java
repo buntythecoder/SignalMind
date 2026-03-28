@@ -64,10 +64,10 @@ class FlywayMigrationIT {
     // ── Flyway history ────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Flyway applies exactly 17 migrations (V1-V17) with no failures")
+    @DisplayName("Flyway applies exactly 19 migrations (V1-V19) with no failures")
     void flyway_eightMigrationsAppliedSuccessfully() {
         MigrationInfo[] applied = flyway.info().applied();
-        assertEquals(17, applied.length, "Expected V1 through V17 to be applied");
+        assertEquals(19, applied.length, "Expected V1 through V19 to be applied");
         for (MigrationInfo m : applied) {
             assertEquals(
                     MigrationState.SUCCESS, m.getState(),
@@ -210,7 +210,7 @@ class FlywayMigrationIT {
     // ── Total table count ─────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("Schema contains exactly 13 business tables (8 core + 2 partitions + signal_feedback + signal_outcomes + refresh_tokens); excludes flyway_schema_history")
+    @DisplayName("Schema contains exactly 14 business tables (8 core + 2 partitions + signal_feedback + signal_outcomes + refresh_tokens + user_watchlist); excludes flyway_schema_history")
     void schema_correctTotalTableCount() {
         Integer count = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables "
@@ -221,10 +221,10 @@ class FlywayMigrationIT {
                 Integer.class);
         // stocks, market_holidays, candles, candles_2024_01, candles_2024_02,
         // volume_baselines, signals, users, audit_log, signal_type_config, signal_feedback,
-        // signal_outcomes, refresh_tokens = 13
-        // V17 adds refresh_tokens — count goes from 12 to 13.
+        // signal_outcomes, refresh_tokens, user_watchlist = 14
+        // V18 extends users; V19 adds user_watchlist — count goes from 13 to 14.
         // (spring_batch_* tables are excluded by the NOT LIKE 'batch_%' filter)
-        assertEquals(13, count, "Expected 13 business tables in public schema after V1-V17 migrations");
+        assertEquals(14, count, "Expected 14 business tables in public schema after V1-V19 migrations");
     }
 
     // ── V14: signal_feedback ──────────────────────────────────────────────────

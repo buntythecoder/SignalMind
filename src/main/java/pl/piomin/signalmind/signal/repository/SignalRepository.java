@@ -95,6 +95,16 @@ public interface SignalRepository extends JpaRepository<Signal, Long> {
     // ── SM-31: Status-based lookups ────────────────────────────────────────────
 
     /**
+     * Returns all signals generated within the given time window, ordered newest first.
+     * Used by the dashboard endpoint to show today's signals (SM-35).
+     *
+     * @param from window start (inclusive) — typically midnight IST
+     * @param to   window end (exclusive)   — typically the next midnight IST
+     * @return signals whose {@code generatedAt} falls within the window, newest first
+     */
+    List<Signal> findByGeneratedAtBetweenOrderByGeneratedAtDesc(Instant from, Instant to);
+
+    /**
      * Finds all active signals (GENERATED or TRIGGERED) across all stocks for
      * real-time intraday monitoring by {@link pl.piomin.signalmind.signal.service.SignalStatusService}.
      *
